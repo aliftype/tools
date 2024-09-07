@@ -65,10 +65,35 @@ def diff(old_buf, new_buf):
     return "<pre>" + old + "\n" + new + "</pre>"
 
 
+def buf_to_svg(vharfbuzz, buf, parameters):
+    import base64
+
+    # If variations are set, the current variations set on the font will be that
+    # of the last shape() call. Which might not correspond to the variations we
+    # want to draw with. So we save the current variations, set the ones we want
+    # to draw with, and restore the saved ones after drawing.
+    saved_variations = None
+    if variations := parameters.get("variations"):
+        saved_variations = vharfbuzz.hbfont.get_var_coords_design()
+        vharfbuzz.hbfont.set_variations(variations)
+
+    svg = vharfbuzz.buf_to_svg(buf)
+
+    if saved_variations is not None:
+        vharfbuzz.hbfont.set_var_coords_design(saved_variations)
+
+    # Use img tag instead of inline SVG as glyphs will have the same IDs across
+    # files, which is broken when files us different variations or fonts.
+    svg = base64.b64encode(svg.encode("utf-8")).decode("utf-8")
+    img = f'<img src="data:image/svg+xml;base64,{svg}" alt="SVG output">'
+    return img
+
+
 def create_report_item(
     vharfbuzz,
     message,
     text=None,
+    parameters={},
     new_buf=None,
     old_buf=None,
     note=None,
@@ -106,11 +131,11 @@ def create_report_item(
 
     # Now draw it as SVG
     if new_buf:
-        message += f"Got: {fix_svg(vharfbuzz.buf_to_svg(new_buf))}\n"
+        message += f"Got: {buf_to_svg(vharfbuzz, new_buf, parameters)}\n"
 
     if old_buf and isinstance(old_buf, FakeBuffer):
         try:
-            message += f"Expected: {fix_svg(vharfbuzz.buf_to_svg(old_buf))}"
+            message += f"Expected: {buf_to_svg(vharfbuzz, old_buf, parameters)}"
         except KeyError:
             pass
 
@@ -216,7 +241,7 @@ def run_a_set_of_shaping_tests(
                 yield True, Message("pass", f"{shaping_file}: No regression detected")
             else:
                 yield from generate_report(
-                    vharfbuzz, shaping_file, failed_shaping_tests
+                    vharfbuzz, config, shaping_file, failed_shaping_tests
                 )
 
     if not shaping_file_found:
@@ -254,7 +279,12 @@ def run_shaping_regression(
         failed_shaping_tests.append((test, expectation, output_buf, output_serialized))
 
 
-def generate_shaping_regression_report(vharfbuzz, shaping_file, failed_shaping_tests):
+def generate_shaping_regression_report(
+    vharfbuzz,
+    configuration,
+    shaping_file,
+    failed_shaping_tests,
+):
     report_items = []
     for test, expected, output_buf, output_serialized in failed_shaping_tests:
         extra_data = {
@@ -262,6 +292,7 @@ def generate_shaping_regression_report(vharfbuzz, shaping_file, failed_shaping_t
             for k in ["script", "language", "direction", "features", "variations"]
             if k in test
         }
+        parameters = get_shaping_parameters(test, configuration)
         # Make HTML report here.
         if "=" in expected:
             buf2 = vharfbuzz.buf_from_string(expected)
@@ -272,6 +303,7 @@ def generate_shaping_regression_report(vharfbuzz, shaping_file, failed_shaping_t
             vharfbuzz=vharfbuzz,
             message="Shaping did not match",
             text=test["input"],
+            parameters=parameters,
             new_buf=output_buf,
             old_buf=buf2,
             note=test.get("note"),
@@ -323,7 +355,12 @@ def run_forbidden_glyph_test(
                 failed_shaping_tests.append((shaping_text, output_buf, forbidden))
 
 
-def forbidden_glyph_test_results(vharfbuzz, shaping_file, failed_shaping_tests):
+def forbidden_glyph_test_results(
+    vharfbuzz,
+    configuration,
+    shaping_file,
+    failed_shaping_tests,
+):
     report_items = []
     for shaping_text, buf, forbidden in failed_shaping_tests:
         msg = f"{shaping_text} produced '{forbidden}'"
@@ -401,7 +438,12 @@ def run_collides_glyph_test(
             failed_shaping_tests.append((shaping_text, bumps, draw, output_buf))
 
 
-def collides_glyph_test_results(vharfbuzz, shaping_file, failed_shaping_tests):
+def collides_glyph_test_results(
+    vharfbuzz,
+    configuration,
+    shaping_file,
+    failed_shaping_tests,
+):
     report_items = []
     seen_bumps = {}
     for shaping_text, bumps, draw, buf in failed_shaping_tests:
@@ -482,7 +524,7 @@ def generate_html(results):
             padding-inline-start: 0;
         }
 
-        .items svg {
+        .items img {
             height: 100px;
             margin: 10px;
         }

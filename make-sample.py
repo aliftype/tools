@@ -62,9 +62,9 @@ def draw(
     if "fvar" in font.ttFont:
         locations = sorted(
             [i.coordinates for i in font.ttFont["fvar"].instances],
-            key=lambda x: -x["wght"],
+            key=lambda x: x.get("wght"),
         )
-    for location in locations:
+    for location in reversed(locations):
         font = BlackRendererFont(path)
         if location is not None:
             font.setLocation(location)

@@ -18,23 +18,13 @@ from __future__ import annotations
 
 import enum
 import sys
+import yaml
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
 
 import vharfbuzz as vhb  # type: ignore
 from fontTools.ttLib import TTFont  # type: ignore
 from fontTools.ttLib.tables._f_v_a_r import table__f_v_a_r  # type: ignore
-
-if sys.version_info >= (3, 11):
-    import tomllib
-    from typing import NotRequired
-
-    TOMLDecodeError = tomllib.TOMLDecodeError
-else:
-    import toml as tomllib
-    from typing_extensions import NotRequired
-
-    TOMLDecodeError = tomllib.TomlDecodeError
 
 
 def main(args: List[str] | None = None) -> None:
@@ -43,7 +33,7 @@ def main(args: List[str] | None = None) -> None:
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "shaping_file", type=Path, help="The .toml shaping definition input file path."
+        "shaping_file", type=Path, help="The .yaml shaping definition input file path."
     )
     parser.add_argument(
         "output_file",
@@ -68,7 +58,7 @@ def main(args: List[str] | None = None) -> None:
 
 
 def update_shaping_output(
-    shaping_input: ShapingInputToml, font_paths: List[Path]
+    shaping_input: ShapingInputYaml, font_paths: List[Path]
 ) -> ShapingOutput:
     tests: List[TestDefinition] = []
     shaping_output = {"tests": tests}
@@ -138,14 +128,9 @@ def shape_run(
     return test_definition
 
 
-def load_shaping_input(input_path: Path) -> ShapingInputToml:
+def load_shaping_input(input_path: Path) -> ShapingInputYaml:
     with input_path.open("rb") as tf:
-        try:
-            shaping_input: ShapingInputToml = tomllib.load(tf)  # type: ignore
-        except TOMLDecodeError as e:
-            raise ValueError(
-                f"{input_path} does not contain a parseable shaping input."
-            ) from e
+        shaping_input: ShapingInputYaml = yaml.safe_load(tf)
 
     if "input" not in shaping_input:
         raise ValueError(f"{input_path} does not contain a valid shaping input.")
@@ -171,7 +156,7 @@ def load_shaping_input(input_path: Path) -> ShapingInputToml:
     return shaping_input
 
 
-class ShapingInputToml(TypedDict):
+class ShapingInputYaml(TypedDict):
     configuration: NotRequired[Dict[str, Any]]
     input: ShapingInput
 

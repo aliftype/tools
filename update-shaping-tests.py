@@ -17,18 +17,18 @@
 from __future__ import annotations
 
 import enum
-import yaml
+import json
 from pathlib import Path
-from typing import Any, Dict, List, NotRequired, Optional, TypedDict
+from typing import Dict, List, NotRequired, Optional, TypedDict
 
 import vharfbuzz
+import yaml
 from fontTools.ttLib import TTFont  # type: ignore
 from fontTools.ttLib.tables._f_v_a_r import table__f_v_a_r  # type: ignore
 
 
 def main(args: List[str] | None = None) -> None:
     import argparse
-    import json
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -89,12 +89,10 @@ def get_shaping_parameters(
     input: ShapingInput,
     configuration: Configuration,
 ) -> VHarfbuzzParameters:
+    defaults = configuration.get("defaults", VHarfbuzzParameters())
     parameters: VHarfbuzzParameters = {}
     for key in VHarfbuzzParameters.__annotations__.keys():
-        defaults = configuration.get("defaults", VHarfbuzzParameters())
         if value := input.get(key, defaults.get(key)):
-            if isinstance(value, Direction):
-                value = value.value
             parameters[key] = value
     return parameters
 
@@ -107,6 +105,7 @@ def shape_run(
     configuration: Configuration,
 ) -> TestDefinition:
     parameters = get_shaping_parameters(input, configuration)
+    parameters = json.loads(json.dumps(parameters))
     buffer = shaper.shape(text, parameters)
 
     shaping_comparison_mode = input.get("comparison_mode", ComparisonMode.FULL)

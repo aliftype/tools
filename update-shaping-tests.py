@@ -17,12 +17,11 @@
 from __future__ import annotations
 
 import enum
-import sys
 import yaml
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, NotRequired, Optional, TypedDict
 
-import vharfbuzz as vhb  # type: ignore
+import vharfbuzz
 from fontTools.ttLib import TTFont  # type: ignore
 from fontTools.ttLib.tables._f_v_a_r import table__f_v_a_r  # type: ignore
 
@@ -58,58 +57,59 @@ def main(args: List[str] | None = None) -> None:
 
 
 def update_shaping_output(
-    shaping_input: ShapingInputYaml, font_paths: List[Path]
+    shaping_input: ShapingInputYaml,
+    font_paths: List[Path],
 ) -> ShapingOutput:
     tests: List[TestDefinition] = []
-    shaping_output = {"tests": tests}
+    shaping_output: ShapingOutput = {"tests": tests}
     if "configuration" in shaping_input:
         shaping_output["configuration"] = shaping_input["configuration"]
 
+    configuration = shaping_input.get("configuration", {})
     for font_path in font_paths:
-        shaper = vhb.Vharfbuzz(font_path)
+        shaper = vharfbuzz.Vharfbuzz(font_path)
         font = TTFont(font_path)
-        for text in shaping_input["input"]["text"]:
-            if "fvar" in font and "variations" not in shaping_input["input"]:
-                fvar: table__f_v_a_r = font["fvar"]  # type: ignore
-                for instance in fvar.instances:
-                    run = shape_run(
-                        shaper,
-                        font_path,
-                        text,
-                        shaping_input["input"],
-                        instance.coordinates,
-                    )
+        for input in shaping_input["input"]:
+            for text in input["text"]:
+                if "fvar" in font and "variations" not in shaping_input["input"]:
+                    fvar: table__f_v_a_r = font["fvar"]  # type: ignore
+                    for instance in fvar.instances:
+                        instance_input = input.copy()
+                        instance_input["variations"] = instance.coordinates
+                        run = shape_run(shaper, font_path, text, input, configuration)
+                        tests.append(run)
+                else:
+                    run = shape_run(shaper, font_path, text, input, configuration)
                     tests.append(run)
-            else:
-                run = shape_run(shaper, font_path, text, shaping_input["input"])
-                tests.append(run)
 
     return shaping_output
 
 
+def get_shaping_parameters(
+    input: ShapingInput,
+    configuration: Configuration,
+) -> VHarfbuzzParameters:
+    parameters: VHarfbuzzParameters = {}
+    for key in VHarfbuzzParameters.__annotations__.keys():
+        defaults = configuration.get("defaults", VHarfbuzzParameters())
+        if value := input.get(key, defaults.get(key)):
+            if isinstance(value, Direction):
+                value = value.value
+            parameters[key] = value
+    return parameters
+
+
 def shape_run(
-    shaper: vhb.Vharfbuzz,
+    shaper: vharfbuzz.Vharfbuzz,
     font_path: Path,
     text: str,
-    shaping_input: ShapingInput,
-    variations: Optional[Dict[str, float]] = None,
+    input: ShapingInput,
+    configuration: Configuration,
 ) -> TestDefinition:
-    parameters: VHarfbuzzParameters = {}
-    if (script := shaping_input.get("script")) is not None:
-        parameters["script"] = script
-    if (direction := shaping_input.get("direction")) is not None:
-        parameters["direction"] = direction.value
-    if (language := shaping_input.get("language")) is not None:
-        parameters["language"] = language
-    if features := shaping_input.get("features"):
-        parameters["features"] = features
-    if variations:
-        parameters["variations"] = variations
-    elif variations := shaping_input.get("variations"):
-        parameters["variations"] = variations
+    parameters = get_shaping_parameters(input, configuration)
     buffer = shaper.shape(text, parameters)
 
-    shaping_comparison_mode = shaping_input["comparison_mode"]
+    shaping_comparison_mode = input.get("comparison_mode", ComparisonMode.FULL)
     if shaping_comparison_mode is ComparisonMode.FULL:
         glyphsonly = False
     elif shaping_comparison_mode is ComparisonMode.GLYPHSTREAM:
@@ -118,14 +118,17 @@ def shape_run(
         raise ValueError(f"Unknown comparison mode {shaping_comparison_mode}.")
     expectation = shaper.serialize_buf(buffer, glyphsonly)
 
-    test_definition: TestDefinition = {
+    test: TestDefinition = {
         "only": font_path.name,
         "input": text,
         "expectation": expectation,
-        **parameters,
     }
 
-    return test_definition
+    for key in TestDefinition.__annotations__.keys():
+        if value := input.get(key):
+            test[key] = value
+
+    return test
 
 
 def load_shaping_input(input_path: Path) -> ShapingInputYaml:
@@ -135,30 +138,25 @@ def load_shaping_input(input_path: Path) -> ShapingInputYaml:
     if "input" not in shaping_input:
         raise ValueError(f"{input_path} does not contain a valid shaping input.")
 
-    input_definition = shaping_input["input"]
-    input_definition["text"] = input_definition.get("text", [])
-    input_definition["script"] = input_definition.get("script")
-    input_definition["language"] = input_definition.get("language")
-    input_definition["direction"] = (
-        Direction(input_definition["direction"])
-        if "direction" in input_definition
-        else None
-    )
-    input_definition["features"] = input_definition.get("features", {})
-    input_definition["comparison_mode"] = ComparisonMode(
-        input_definition.get("comparison_mode", "full")
-    )
-
-    shaping_input["input"] = input_definition
-    if configuration := shaping_input.get("configuration"):
-        shaping_input["configuration"] = configuration
+    inputs = list(shaping_input["input"])
+    for input in inputs:
+        if "direction" in input:
+            input["direction"] = Direction(input["direction"])
+        if "comparison_mode" in input:
+            input["comparison_mode"] = ComparisonMode(input["comparison_mode"])
+    shaping_input["input"] = inputs
 
     return shaping_input
 
 
+class Configuration(TypedDict):
+    defaults: NotRequired[VHarfbuzzParameters]
+    forbidden_glyphs: NotRequired[List[str]]
+
+
 class ShapingInputYaml(TypedDict):
-    configuration: NotRequired[Dict[str, Any]]
-    input: ShapingInput
+    configuration: NotRequired[Configuration]
+    input: List[ShapingInput]
 
 
 class ShapingInput(TypedDict):
@@ -168,14 +166,15 @@ class ShapingInput(TypedDict):
     direction: Optional[Direction]
     features: Dict[str, bool]
     comparison_mode: ComparisonMode
+    variations: Optional[Dict[str, float]]
 
 
-class ComparisonMode(enum.Enum):
+class ComparisonMode(enum.StrEnum):
     FULL = "full"  # Record glyph names, offsets and advance widths.
     GLYPHSTREAM = "glyphstream"  # Just glyph names.
 
 
-class Direction(enum.Enum):
+class Direction(enum.StrEnum):
     LEFT_TO_RIGHT = "ltr"
     RIGHT_TO_LEFT = "rtl"
     TOP_TO_BOTTOM = "ttb"
@@ -183,7 +182,7 @@ class Direction(enum.Enum):
 
 
 class ShapingOutput(TypedDict):
-    configuration: NotRequired[Dict[str, Any]]
+    configuration: NotRequired[Configuration]
     tests: List[TestDefinition]
 
 
@@ -192,6 +191,7 @@ class VHarfbuzzParameters(TypedDict, total=False):
     direction: str
     language: str
     features: Dict[str, bool]
+    shaper: str
     variations: Dict[str, float]
 
 

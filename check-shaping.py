@@ -175,6 +175,22 @@ def get_shaping_parameters(
     return parameters
 
 
+def get_input_strings(
+    test: Dict[str, Any],
+    configuration: Dict[str, Any],
+) -> list[str]:
+    input_type = get_from_test_with_default(test, configuration, "input_type", "string")
+    if input_type == "pattern":
+        from stringbrewer import StringBrewer
+
+        sb = StringBrewer(
+            recipe=test["input"],
+            ingredients=configuration["ingredients"],
+        )
+        return sb.generate_all()
+    return [test["input"]]
+
+
 # This is a very generic "do something with shaping" test runner.
 # It'll be given concrete meaning later.
 def run_a_set_of_shaping_tests(
@@ -371,23 +387,9 @@ def run_forbidden_glyph_test(
     failed_shaping_tests: list,
     extra_data: Dict[str, Any],
 ):
-
-    is_stringbrewer = (
-        get_from_test_with_default(test, configuration, "input_type", "string")
-        == "pattern"
-    )
     parameters = get_shaping_parameters(test, configuration)
+    strings = get_input_strings(test, configuration)
     forbidden_glyphs = configuration["forbidden_glyphs"]
-    if is_stringbrewer:
-        from stringbrewer import StringBrewer  # type: ignore
-
-        sb = StringBrewer(
-            recipe=test["input"], ingredients=configuration["ingredients"]
-        )
-        strings = sb.generate_all()
-    else:
-        strings = [test["input"]]
-
     for shaping_text in strings:
         output_buf = vharfbuzz.shape(shaping_text, parameters)
         output_serialized = vharfbuzz.serialize_buf(output_buf, glyphsonly=True)
@@ -461,25 +463,16 @@ def run_collides_glyph_test(
     failed_shaping_tests: list,
     extra_data: Dict[str, Any],
 ):
-    col = extra_data["collidoscope"]
-    is_stringbrewer = (
-        get_from_test_with_default(test, configuration, "input_type", "string")
-        == "pattern"
-    )
+
     parameters = get_shaping_parameters(test, configuration)
+    strings = get_input_strings(test, configuration)
+    col = extra_data["collidoscope"]
     allowed_collisions = get_from_test_with_default(
-        test, configuration, "allowedcollisions", []
+        test,
+        configuration,
+        "allowedcollisions",
+        [],
     )
-    if is_stringbrewer:
-        from stringbrewer import StringBrewer  # type: ignore
-
-        sb = StringBrewer(
-            recipe=test["input"], ingredients=configuration["ingredients"]
-        )
-        strings = sb.generate_all()
-    else:
-        strings = [test["input"]]
-
     for shaping_text in strings:
         output_buf = vharfbuzz.shape(shaping_text, parameters)
         glyphs = col.get_glyphs(shaping_text, buf=output_buf)

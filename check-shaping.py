@@ -379,7 +379,7 @@ def run_forbidden_glyph_test(
     parameters = get_shaping_parameters(test, configuration)
     forbidden_glyphs = configuration["forbidden_glyphs"]
     if is_stringbrewer:
-        from stringbrewer import StringBrewer
+        from stringbrewer import StringBrewer  # type: ignore
 
         sb = StringBrewer(
             recipe=test["input"], ingredients=configuration["ingredients"]
@@ -443,7 +443,7 @@ def setup_glyph_collides(
             "faraway": True,
             "adjacent_clusters": True,
         }
-    from collidoscope import Collidoscope
+    from collidoscope import Collidoscope  # type: ignore
 
     col = Collidoscope(
         fontpath,
@@ -471,7 +471,7 @@ def run_collides_glyph_test(
         test, configuration, "allowedcollisions", []
     )
     if is_stringbrewer:
-        from stringbrewer import StringBrewer
+        from stringbrewer import StringBrewer  # type: ignore
 
         sb = StringBrewer(
             recipe=test["input"], ingredients=configuration["ingredients"]

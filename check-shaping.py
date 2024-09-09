@@ -387,15 +387,22 @@ def run_forbidden_glyph_test(
     failed_shaping_tests: list,
     extra_data: Dict[str, Any],
 ):
+    import re
+
     parameters = get_shaping_parameters(test, configuration)
     strings = get_input_strings(test, configuration)
     forbidden_glyphs = configuration["forbidden_glyphs"]
     for shaping_text in strings:
         output_buf = vharfbuzz.shape(shaping_text, parameters)
         output_serialized = vharfbuzz.serialize_buf(output_buf, glyphsonly=True)
-        glyph_names = output_serialized.split("|")
+        glyph_names = "|" + output_serialized + "|"
         for forbidden in forbidden_glyphs:
-            if forbidden in glyph_names:
+            pattern = forbidden
+            if not forbidden.startswith(r"\|"):
+                pattern = r"\|" + forbidden
+            if not forbidden.endswith(r"\|"):
+                pattern += r"\|"
+            if m := re.findall(pattern, glyph_names):
                 failed_shaping_tests.append((shaping_text, output_buf, forbidden))
 
 

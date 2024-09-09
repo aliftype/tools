@@ -1,11 +1,10 @@
 import argparse
 
-from blackrenderer.font import BlackRendererFont
+import uharfbuzz as hb
 from blackrenderer.backends.svg import SVGSurface
+from blackrenderer.font import BlackRendererFont
 from blackrenderer.render import buildGlyphLine, calcGlyphLineBounds
 from fontTools.misc.arrayTools import insetRect, offsetRect, unionRect
-
-import uharfbuzz as hb
 
 
 def parseFeatures(text):

@@ -16,8 +16,11 @@
 
 import json
 from pathlib import Path
+from typing import Any, Dict, Callable
+from collections.abc import Generator
 
-from vharfbuzz import Vharfbuzz, FakeBuffer
+import uharfbuzz as hb
+from vharfbuzz import FakeBuffer, Vharfbuzz
 
 
 class Message:
@@ -33,17 +36,20 @@ class Message:
         self.items = items
 
 
-def fix_svg(svg):
+def fix_svg(svg: str) -> str:
     return svg.replace("\n", " ")
 
 
-def diff(old_buf, new_buf):
+def diff(
+    old_str: str,
+    new_str: str,
+) -> str:
     from difflib import SequenceMatcher
 
     sequence = SequenceMatcher(
         isjunk=lambda x: x in ("|", "+", "=", "@", ","),
-        a=new_buf,
-        b=old_buf,
+        a=new_str,
+        b=old_str,
     )
 
     old = []
@@ -65,7 +71,11 @@ def diff(old_buf, new_buf):
     return "<pre>" + old + "\n" + new + "</pre>"
 
 
-def buf_to_svg(vharfbuzz, buf, parameters):
+def buf_to_svg(
+    vharfbuzz: Vharfbuzz,
+    buf: hb.Buffer,  # type: ignore
+    parameters: Dict[str, Any],
+) -> str:
     import base64
 
     # If variations are set, the current variations set on the font will be that
@@ -90,15 +100,15 @@ def buf_to_svg(vharfbuzz, buf, parameters):
 
 
 def create_report_item(
-    vharfbuzz,
-    message,
-    text=None,
-    parameters={},
-    new_buf=None,
-    old_buf=None,
-    note=None,
-    extra_data=None,
-):
+    vharfbuzz: Vharfbuzz,
+    message: str,
+    text: str | None = None,
+    parameters: Dict[str, Any] = {},
+    new_buf: hb.Buffer | FakeBuffer | None = None,  # type: ignore
+    old_buf: hb.Buffer | None = None,  # type: ignore
+    note: str | None = None,
+    extra_data: Dict | None = None,
+) -> str:
     message = f"<h4>{message}"
     if text:
         message += f": {text}"
@@ -122,7 +132,7 @@ def create_report_item(
             serialized_old_buf = old_buf
 
     if new_buf:
-        glyphsonly = old_buf and isinstance(old_buf, str)
+        glyphsonly = bool(old_buf and isinstance(old_buf, str))
         serialized_new_buf = vharfbuzz.serialize_buf(new_buf, glyphsonly=glyphsonly)
 
     # Report a diff table
@@ -142,33 +152,46 @@ def create_report_item(
     return message
 
 
-def get_from_test_with_default(test, configuration, element, default=None):
+def get_from_test_with_default(
+    test: Dict[str, Any],
+    configuration: Dict[str, Any],
+    key: str,
+    default: Any | None = None,
+):
     defaults = configuration.get("defaults", {})
-    return test.get(element, defaults.get(element, default))
+    return test.get(key, defaults.get(key, default))
 
 
-def get_shaping_parameters(test, configuration):
-    params = {}
-    for element in ["script", "language", "direction", "features", "shaper"]:
-        params[element] = get_from_test_with_default(test, configuration, element)
-    params["variations"] = get_from_test_with_default(
+def get_shaping_parameters(
+    test: Dict[str, Any],
+    configuration: Dict[str, Any],
+):
+    parameters = {}
+    for key in ["script", "language", "direction", "features", "shaper"]:
+        parameters[key] = get_from_test_with_default(test, configuration, key)
+    parameters["variations"] = get_from_test_with_default(
         test, configuration, "variations", {}
     )
-    return params
+    return parameters
 
 
 # This is a very generic "do something with shaping" test runner.
 # It'll be given concrete meaning later.
 def run_a_set_of_shaping_tests(
-    config, fontpath, run_a_test, test_filter, generate_report, preparation=None
-):
+    configuration: Dict[str, Any],
+    fontpath: Path,
+    run_a_test: Callable,
+    test_filter: Callable,
+    generate_report: Callable,
+    preparation: Callable | None = None,
+) -> Generator[tuple[bool | None, Message]]:
     vharfbuzz = Vharfbuzz(fontpath)
 
     shaping_file_found = False
     ran_a_test = False
     extra_data = None
 
-    shaping_basedir = config.get("test_directory")
+    shaping_basedir = configuration.get("test_directory")
     if not shaping_basedir:
         yield False, Message(
             "no-dir", "Shaping test directory not defined in configuration file"
@@ -241,7 +264,10 @@ def run_a_set_of_shaping_tests(
                 yield True, Message("pass", f"{shaping_file}: No regression detected")
             else:
                 yield from generate_report(
-                    vharfbuzz, config, shaping_file, failed_shaping_tests
+                    vharfbuzz,
+                    configuration,
+                    shaping_file,
+                    failed_shaping_tests,
                 )
 
     if not shaping_file_found:
@@ -251,10 +277,13 @@ def run_a_set_of_shaping_tests(
         yield None, Message("skip", "No applicable tests ran.")
 
 
-def check_shaping_regression(config, fontpath):
+def check_shaping_regression(
+    configuration: Dict[str, Any],
+    fontpath: Path,
+) -> Generator[tuple[bool | None, Message]]:
     """Check that texts shape as per expectation"""
     yield from run_a_set_of_shaping_tests(
-        config,
+        configuration,
         fontpath,
         run_shaping_regression,
         lambda test, configuration: "expectation" in test,
@@ -263,7 +292,12 @@ def check_shaping_regression(config, fontpath):
 
 
 def run_shaping_regression(
-    fontpath, vharfbuzz, test, configuration, failed_shaping_tests, extra_data
+    fontpath: Path,
+    vharfbuzz: Vharfbuzz,
+    test: Dict[str, Any],
+    configuration: Dict[str, Any],
+    failed_shaping_tests: list,
+    extra_data: Dict[str, Any],
 ):
     shaping_text = test["input"]
     parameters = get_shaping_parameters(test, configuration)
@@ -280,11 +314,11 @@ def run_shaping_regression(
 
 
 def generate_shaping_regression_report(
-    vharfbuzz,
-    configuration,
-    shaping_file,
-    failed_shaping_tests,
-):
+    vharfbuzz: Vharfbuzz,
+    configuration: Dict[str, Any],
+    shaping_file: Path,
+    failed_shaping_tests: list,
+) -> Generator[tuple[bool | None, Message]]:
     report_items = []
     for test, expected, output_buf, output_serialized in failed_shaping_tests:
         extra_data = {
@@ -315,10 +349,13 @@ def generate_shaping_regression_report(
     yield False, Message("shaping-regression", header, report_items)
 
 
-def check_shaping_forbidden(config, fontpath):
+def check_shaping_forbidden(
+    configuration: Dict[str, Any],
+    fontpath: Path,
+) -> Generator[tuple[bool | None, Message]]:
     """Check that no forbidden glyphs are found while shaping"""
     yield from run_a_set_of_shaping_tests(
-        config,
+        configuration,
         fontpath,
         run_forbidden_glyph_test,
         lambda test, configuration: "forbidden_glyphs" in configuration,
@@ -327,7 +364,12 @@ def check_shaping_forbidden(config, fontpath):
 
 
 def run_forbidden_glyph_test(
-    fontpath, vharfbuzz, test, configuration, failed_shaping_tests, extra_data
+    fontpath: Path,
+    vharfbuzz: Vharfbuzz,
+    test: Dict[str, Any],
+    configuration: Dict[str, Any],
+    failed_shaping_tests: list,
+    extra_data: Dict[str, Any],
 ):
 
     is_stringbrewer = (
@@ -356,11 +398,11 @@ def run_forbidden_glyph_test(
 
 
 def forbidden_glyph_test_results(
-    vharfbuzz,
-    configuration,
-    shaping_file,
-    failed_shaping_tests,
-):
+    vharfbuzz: Vharfbuzz,
+    configuration: Dict[str, Any],
+    shaping_file: Path,
+    failed_shaping_tests: list,
+) -> Generator[tuple[bool | None, Message]]:
     report_items = []
     for shaping_text, buf, forbidden in failed_shaping_tests:
         msg = f"{shaping_text} produced '{forbidden}'"
@@ -372,10 +414,13 @@ def forbidden_glyph_test_results(
     yield False, Message("shaping-forbidden", header, report_items)
 
 
-def check_shaping_collides(config, fontpath):
+def check_shaping_collides(
+    configuration: Dict[str, Any],
+    fontpath: Path,
+) -> Generator[tuple[bool | None, Message]]:
     """Check that no collisions are found while shaping"""
     yield from run_a_set_of_shaping_tests(
-        config,
+        configuration,
         fontpath,
         run_collides_glyph_test,
         lambda test, configuration: "collidoscope" in test
@@ -385,7 +430,10 @@ def check_shaping_collides(config, fontpath):
     )
 
 
-def setup_glyph_collides(fontpath, configuration):
+def setup_glyph_collides(
+    fontpath: Path,
+    configuration: Dict[str, Any],
+) -> Dict[str, Any]:
 
     collidoscope_configuration = configuration.get("collidoscope")
     if not collidoscope_configuration:
@@ -406,7 +454,12 @@ def setup_glyph_collides(fontpath, configuration):
 
 
 def run_collides_glyph_test(
-    fontpath, vharfbuzz, test, configuration, failed_shaping_tests, extra_data
+    fontpath: Path,
+    vharfbuzz: Vharfbuzz,
+    test: Dict[str, Any],
+    configuration: Dict[str, Any],
+    failed_shaping_tests: list,
+    extra_data: Dict[str, Any],
 ):
     col = extra_data["collidoscope"]
     is_stringbrewer = (
@@ -439,11 +492,11 @@ def run_collides_glyph_test(
 
 
 def collides_glyph_test_results(
-    vharfbuzz,
-    configuration,
-    shaping_file,
-    failed_shaping_tests,
-):
+    vharfbuzz: Vharfbuzz,
+    configuration: Dict[str, Any],
+    shaping_file: Path,
+    failed_shaping_tests: list,
+) -> Generator[tuple[bool | None, Message]]:
     report_items = []
     seen_bumps = {}
     for shaping_text, bumps, draw, buf in failed_shaping_tests:
@@ -464,21 +517,24 @@ def collides_glyph_test_results(
     yield False, Message("shaping-collides", header, report_items)
 
 
-def run_checks(config, fontpath):
+def run_checks(
+    configuration: Dict[str, Any],
+    fontpath: Path,
+):
     return {
         "Check that texts shape as per expectation": check_shaping_regression(
-            config, fontpath
+            configuration, fontpath
         ),
         "Check that no forbidden glyphs are found while shaping": check_shaping_forbidden(
-            config, fontpath
+            configuration, fontpath
         ),
         "Check that no collisions are found while shaping": check_shaping_collides(
-            config, fontpath
+            configuration, fontpath
         ),
     }
 
 
-def emoticon(status):
+def emoticon(status: bool | None) -> str:
     return {
         False: "FAIL 🔥",
         None: "SKIP ⏩",
@@ -486,7 +542,9 @@ def emoticon(status):
     }[status]
 
 
-def generate_html(results):
+def generate_html(
+    results: Dict[str, Generator[tuple[bool | None, Message], None, None]],
+) -> tuple[str, bool]:
     all_pass = True
 
     html = """
@@ -551,9 +609,9 @@ def generate_html(results):
 <body>
     <h1>Shaping checks results</h1>
 """
-    for check, results in results.items():
+    for check, check_results in results.items():
         html += f"<h2>{check}</h2>\n"
-        for status, result in results:
+        for status, result in check_results:
             if status is False:
                 all_pass = False
             indicator = emoticon(status)
@@ -570,6 +628,7 @@ def generate_html(results):
 
 def main(argv=None):
     import argparse
+
     import yaml
 
     parser = argparse.ArgumentParser(description="Run Google Fonts checks on a font.")

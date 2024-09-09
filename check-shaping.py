@@ -56,14 +56,14 @@ def diff(
     new = []
     for opcode, a0, a1, b0, b1 in sequence.get_opcodes():
         if opcode == "equal":
-            old.append(sequence.b[b0:b1])
-            new.append(sequence.a[a0:a1])
+            old.append(old_str[b0:b1])
+            new.append(new_str[a0:a1])
         elif opcode in ("insert", "delete"):
-            old.append("<del>" + sequence.b[b0:b1] + "</del>")
-            new.append("<ins>" + sequence.a[a0:a1] + "</ins>")
+            old.append("<del>" + old_str[b0:b1] + "</del>")
+            new.append("<ins>" + new_str[a0:a1] + "</ins>")
         elif opcode == "replace":
-            old.append("<del>" + sequence.b[b0:b1] + "</del>")
-            new.append("<ins>" + sequence.a[a0:a1] + "</ins>")
+            old.append("<del>" + old_str[b0:b1] + "</del>")
+            new.append("<ins>" + new_str[a0:a1] + "</ins>")
         else:
             raise RuntimeError("unexpected opcode")
     old = "<span class='expected'>" + "".join(old) + "</span>"

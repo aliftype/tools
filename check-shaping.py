@@ -402,7 +402,7 @@ def run_forbidden_glyph_test(
                 pattern = r"\|" + forbidden
             if not forbidden.endswith(r"\|"):
                 pattern += r"\|"
-            if m := re.findall(pattern, glyph_names):
+            if re.findall(pattern, glyph_names):
                 failed_shaping_tests.append((shaping_text, output_buf, forbidden))
 
 

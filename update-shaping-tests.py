@@ -21,7 +21,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, NotRequired, Optional, TypedDict
 
-import vharfbuzz
+import uharfbuzz as hb
 import yaml
 from fontTools.ttLib import TTFont  # type: ignore
 from fontTools.ttLib.tables._f_v_a_r import table__f_v_a_r  # type: ignore
@@ -67,7 +67,9 @@ def update_shaping_output(
 
     configuration = shaping_input.get("configuration", {})
     for font_path in font_paths:
-        shaper = vharfbuzz.Vharfbuzz(font_path)
+        blob = hb.Blob.from_file_path(font_path)  # type: ignore
+        face = hb.Face(blob)  # type: ignore
+        hbfont = hb.Font(face)  # type: ignore
         font = TTFont(font_path)
         for input in shaping_input["input"]:
             for text in input["text"]:
@@ -76,10 +78,10 @@ def update_shaping_output(
                     for instance in fvar.instances:
                         instance_input = input.copy()
                         instance_input["variations"] = instance.coordinates
-                        run = shape_run(shaper, font_path, text, input, configuration)
+                        run = shape_run(hbfont, font_path, text, input, configuration)
                         tests.append(run)
                 else:
-                    run = shape_run(shaper, font_path, text, input, configuration)
+                    run = shape_run(hbfont, font_path, text, input, configuration)
                     tests.append(run)
 
     return shaping_output
@@ -88,17 +90,69 @@ def update_shaping_output(
 def get_shaping_parameters(
     input: ShapingInput,
     configuration: Configuration,
-) -> VHarfbuzzParameters:
-    defaults = configuration.get("defaults", VHarfbuzzParameters())
-    parameters: VHarfbuzzParameters = {}
-    for key in VHarfbuzzParameters.__annotations__.keys():
+) -> ShapingParameters:
+    defaults = configuration.get("defaults", ShapingParameters())
+    parameters: ShapingParameters = {}
+    for key in ShapingParameters.__annotations__.keys():
         if value := input.get(key, defaults.get(key)):
             parameters[key] = value
     return parameters
 
 
+def _shape(
+    font: hb.Font,  # type: ignore
+    text: str,
+    parameters: Dict[str, Any],
+) -> hb.Buffer:  # type: ignore
+    buf = hb.Buffer()  # type: ignore
+    buf.add_str(text)
+    buf.guess_segment_properties()
+
+    if script := parameters.get("script"):
+        buf.script = script
+    if direction := parameters.get("direction"):
+        buf.direction = direction
+    if language := parameters.get("language"):
+        buf.language = language
+
+    shapers = []
+    if shaper := parameters.get("shaper"):
+        shapers = [shaper]
+
+    saved_variations = None
+    variations = parameters.get("variations")
+    if variations:
+        saved_variations = font.get_var_coords_design()
+        font.set_variations(variations)
+
+    hb.shape(font, buf, parameters.get("features"), shapers=shapers)  # type: ignore
+
+    if saved_variations is not None:
+        font.set_var_coords_design(saved_variations)
+
+    return buf
+
+
+def _serialize_buffer(
+    font: hb.Font,  # type: ignore
+    buffer: hb.Buffer,  # type: ignore
+    glyphs_only: bool = False,
+) -> str:
+    outs = []
+    for info, pos in zip(buffer.glyph_infos, buffer.glyph_positions):  # type: ignore
+        glyph_name = font.glyph_to_string(info.codepoint)
+        if glyphs_only:
+            outs.append(glyph_name)
+            continue
+        outs.append("%s=%i" % (glyph_name, info.cluster))
+        if pos.position[0] != 0 or pos.position[1] != 0:
+            outs[-1] = outs[-1] + "@%i,%i" % (pos.position[0], pos.position[1])
+        outs[-1] = outs[-1] + "+%i" % (pos.position[2])
+    return "|".join(outs)
+
+
 def shape_run(
-    shaper: vharfbuzz.Vharfbuzz,
+    font: hb.Font,  # type: ignore
     font_path: Path,
     text: str,
     input: ShapingInput,
@@ -106,7 +160,7 @@ def shape_run(
 ) -> TestDefinition:
     parameters = get_shaping_parameters(input, configuration)
     parameters = json.loads(json.dumps(parameters))
-    buffer = shaper.shape(text, parameters)
+    buffer = _shape(font, text, parameters)
 
     shaping_comparison_mode = input.get("comparison_mode", ComparisonMode.FULL)
     if shaping_comparison_mode is ComparisonMode.FULL:
@@ -115,7 +169,7 @@ def shape_run(
         glyphsonly = True
     else:
         raise ValueError(f"Unknown comparison mode {shaping_comparison_mode}.")
-    expectation = shaper.serialize_buf(buffer, glyphsonly)
+    expectation = _serialize_buffer(font, buffer, glyphsonly)
 
     test: TestDefinition = {
         "only": font_path.name,
@@ -149,7 +203,7 @@ def load_shaping_input(input_path: Path) -> ShapingInputYaml:
 
 
 class Configuration(TypedDict):
-    defaults: NotRequired[VHarfbuzzParameters]
+    defaults: NotRequired[ShapingParameters]
     forbidden_glyphs: NotRequired[List[str]]
 
 
@@ -185,7 +239,7 @@ class ShapingOutput(TypedDict):
     tests: List[TestDefinition]
 
 
-class VHarfbuzzParameters(TypedDict, total=False):
+class ShapingParameters(TypedDict, total=False):
     script: str
     direction: str
     language: str
@@ -194,7 +248,7 @@ class VHarfbuzzParameters(TypedDict, total=False):
     variations: Dict[str, float]
 
 
-class TestDefinition(VHarfbuzzParameters):
+class TestDefinition(ShapingParameters):
     input: str
     expectation: str
     only: NotRequired[str]

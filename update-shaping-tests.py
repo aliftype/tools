@@ -88,7 +88,6 @@ def update_shaping_output(
                 else:
                     run = shape_run(font, font_path, text, input, configuration)
                     tests.append(run)
-
     return shaping_output
 
 

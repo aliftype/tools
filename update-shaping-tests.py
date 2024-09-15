@@ -78,7 +78,13 @@ def update_shaping_output(
                     for instance in fvar.instances:
                         instance_input = input.copy()
                         instance_input["variations"] = instance.coordinates
-                        run = shape_run(hbfont, font_path, text, input, configuration)
+                        run = shape_run(
+                            hbfont,
+                            font_path,
+                            text,
+                            instance_input,
+                            configuration,
+                        )
                         tests.append(run)
                 else:
                     run = shape_run(hbfont, font_path, text, input, configuration)

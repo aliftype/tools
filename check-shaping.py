@@ -15,9 +15,9 @@
 # limitations under the License.
 
 import json
-from pathlib import Path
-from typing import Any, Dict, Callable
 from collections.abc import Generator
+from pathlib import Path
+from typing import Any, Callable, Dict
 
 import uharfbuzz as hb
 

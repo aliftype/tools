@@ -19,12 +19,10 @@ from __future__ import annotations
 import enum
 import json
 from pathlib import Path
-from typing import Dict, List, NotRequired, Optional, TypedDict
+from typing import Any, Dict, List, NotRequired, Optional, TypedDict
 
 import uharfbuzz as hb
 import yaml
-from fontTools.ttLib import TTFont  # type: ignore
-from fontTools.ttLib.tables._f_v_a_r import table__f_v_a_r  # type: ignore
 
 
 def main(args: List[str] | None = None) -> None:
@@ -69,17 +67,18 @@ def update_shaping_output(
     for font_path in font_paths:
         blob = hb.Blob.from_file_path(font_path)  # type: ignore
         face = hb.Face(blob)  # type: ignore
-        hbfont = hb.Font(face)  # type: ignore
-        font = TTFont(font_path)
+        font = hb.Font(face)  # type: ignore
         for input in shaping_input["input"]:
             for text in input["text"]:
-                if "fvar" in font and "variations" not in shaping_input["input"]:
-                    fvar: table__f_v_a_r = font["fvar"]  # type: ignore
-                    for instance in fvar.instances:
+                if face.has_var_data and "variations" not in shaping_input["input"]:
+                    axis_tags = [axis.tag for axis in face.axis_infos]
+                    for instance in face.named_instances:
                         instance_input = input.copy()
-                        instance_input["variations"] = instance.coordinates
+                        instance_input["variations"] = dict(
+                            zip(axis_tags, instance.design_coords)
+                        )
                         run = shape_run(
-                            hbfont,
+                            font,
                             font_path,
                             text,
                             instance_input,
@@ -87,7 +86,7 @@ def update_shaping_output(
                         )
                         tests.append(run)
                 else:
-                    run = shape_run(hbfont, font_path, text, input, configuration)
+                    run = shape_run(font, font_path, text, input, configuration)
                     tests.append(run)
 
     return shaping_output

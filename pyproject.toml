@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=45", "setuptools_scm[toml]>=8.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "AlifTools"
+description = "Helper tools for Alif Type Foundry"
+license = { file = "LICENSE.txt" }
+readme = "README.md"
+dynamic = ["version"]
+authors = [{ name = "Khaled Hosny", email = "khaled@aliftype.com" }]
+classifiers = ['Environment :: Console', 'Topic :: Text Processing :: Fonts']
+dependencies = ["uharfbuzz>=0.39.5"]
+
+[project.optional-dependencies]
+shaping = ["json", "yaml"]
+sample = ["blackrenderer"]
+
+[project.urls]
+Repository = "https://github.com/aliftype/tools"
+Issues = "https://github.com/aliftype/tools/issues"
+
+[tool.setuptools.packages.find]
+where = ["Lib"]
+
+[project.scripts]
+check-shaping = "alifTools.shaping.check:main"
+update-shaping-tests = "alifTools.shaping.update:main"
+make-sample = "alifTools.sample:main"
+
+[tool.setuptools_scm]
+write_to = "Lib/alifTools/_version.py"
+
+[tool.black]
+exclude = '''
+(
+    _version.py
+)
+'''

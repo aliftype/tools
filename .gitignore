@@ -1,0 +1,3 @@
+/build
+Lib/alifTools/_version.py
+*.egg-info

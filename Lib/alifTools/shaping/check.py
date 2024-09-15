@@ -23,6 +23,16 @@ from typing import Any, Callable, Dict
 
 import uharfbuzz as hb
 
+from . import (
+    Configuration,
+    ShapingParameters,
+    TestDefinition,
+    buffer_to_svg,
+    get_shaping_parameters,
+    serialize_buffer,
+    shape,
+)
+
 
 class Message:
     """Status messages to be yielded by FontBakeryCheck"""
@@ -64,27 +74,6 @@ class _FakeItem:
         self.position = [x_offset, y_offset, x_advance, y_advance]
 
 
-class _SetVariations:
-    def __init__(
-        self,
-        font: hb.Font,  # type: ignore
-        variations: Dict[str, Any] | None,
-    ):
-        self.font = font
-        self.variations = variations
-        self.saved_variations = None
-
-    def __enter__(self):
-        if self.variations:
-            self.saved_variations = self.font.get_var_coords_design()
-            self.font.set_variations(self.variations)
-        return self.font
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        if self.saved_variations is not None:
-            self.font.set_var_coords_design(self.saved_variations)
-
-
 def fix_svg(svg: str) -> str:
     return svg.replace("\n", " ")
 
@@ -118,189 +107,6 @@ def diff(
     old = "<span class='expected'>" + "".join(old) + "</span>"
     new = "<span class='actual'>" + "".join(new) + "</span>"
     return "<pre>" + old + "\n" + new + "</pre>"
-
-
-def _shape(
-    font: hb.Font,  # type: ignore
-    text: str,
-    parameters: Dict[str, Any],
-) -> hb.Buffer:  # type: ignore
-    buffer = hb.Buffer()  # type: ignore
-    buffer.add_str(text)
-    buffer.guess_segment_properties()
-
-    if script := parameters.get("script"):
-        buffer.script = script
-    if direction := parameters.get("direction"):
-        buffer.direction = direction
-    if language := parameters.get("language"):
-        buffer.language = language
-
-    shapers = []
-    if shaper := parameters.get("shaper"):
-        shapers = [shaper]
-
-    with _SetVariations(font, parameters.get("variations")):
-        hb.shape(font, buffer, parameters.get("features"), shapers=shapers)  # type: ignore
-
-    return buffer
-
-
-def _serialize_buffer(
-    font: hb.Font,  # type: ignore
-    buffer: hb.Buffer | _FakeBuffer,  # type: ignore
-    glyphs_only: bool = False,
-) -> str:
-    outs = []
-    for info, pos in zip(buffer.glyph_infos, buffer.glyph_positions):  # type: ignore
-        if (glyph_name := getattr(info, "name", None)) is None:
-            glyph_name = font.glyph_to_string(info.codepoint)
-        if glyphs_only:
-            outs.append(glyph_name)
-            continue
-        outs.append("%s=%i" % (glyph_name, info.cluster))
-        if pos.position[0] != 0 or pos.position[1] != 0:
-            outs[-1] = outs[-1] + "@%i,%i" % (pos.position[0], pos.position[1])
-        outs[-1] = outs[-1] + "+%i" % (pos.position[2])
-    return "|".join(outs)
-
-
-def _move_to(x, y, buffer_list):
-    buffer_list.append(f"M{x},{y}")
-
-
-def _line_to(x, y, buffer_list):
-    buffer_list.append(f"L{x},{y}")
-
-
-def _cubic_to(c1x, c1y, c2x, c2y, x, y, buffer_list):
-    buffer_list.append(f"C{c1x},{c1y} {c2x},{c2y} {x},{y}")
-
-
-def _quadratic_to(c1x, c1y, x, y, buffer_list):
-    buffer_list.append(f"Q{c1x},{c1y} {x},{y}")
-
-
-def _close_path(buffer_list):
-    buffer_list.append("Z")
-
-
-_draw_functions = hb.DrawFuncs()  # type: ignore
-_draw_functions.set_move_to_func(_move_to)
-_draw_functions.set_line_to_func(_line_to)
-_draw_functions.set_cubic_to_func(_cubic_to)
-_draw_functions.set_quadratic_to_func(_quadratic_to)
-_draw_functions.set_close_path_func(_close_path)
-
-
-def _glyph_to_svg_path(
-    font: hb.Font,  # type: ignore
-    gid: int,
-) -> str:
-    buffer_list: list[str] = []
-    font.draw_glyph(gid, _draw_functions, buffer_list)
-    return "".join(buffer_list)
-
-
-def _glyph_to_svg_id(
-    font: hb.Font,  # type: ignore
-    gid: int,
-    defs: Dict[str, str],
-) -> str:
-    id = f"g{gid}"
-    if id not in defs:
-        p = _glyph_to_svg_path(font, gid)
-        defs[id] = f'<path id="{id}" d="{p}"/>'
-    return id
-
-
-def _to_svg_color(color):
-    svg_color = [f"{color.red}", f"{color.green}", f"{color.blue}"]
-    if color.alpha != 255:
-        svg_color.append(f"{color.alpha/255:.0%}")
-    return f"rgb({','.join(svg_color)})"
-
-
-def _glyph_to_svg(font, gid, x, y, defs):
-    transform = f'transform="translate({x},{y})"'
-    svg = [f"<g {transform}>"]
-    face = font.face
-    if (layers := hb.ot_color_glyph_get_layers(face, gid)) and (palette := hb.ot_color_palette_get_colors(face, 0)):  # type: ignore
-        for layer in layers:
-            id = _glyph_to_svg_id(font, layer.glyph, defs)
-            if layer.color_index != 0xFFFF:
-                color = _to_svg_color(palette[layer.color_index])
-                svg.append(f'<use href="#{id}" fill="{color}"/>')
-            else:
-                svg.append(f'<use href="#{id}"/>')
-    else:
-        id = _glyph_to_svg_id(font, gid, defs)
-        svg.append(f'<use href="#{id}"/>')
-    svg.append("</g>")
-    return "\n".join(svg)
-
-
-def _draw_buffer(
-    font: hb.Font,  # type: ignore
-    buffer: hb.Buffer,  # type: ignore
-) -> str:
-    defs = {}
-    paths = []
-
-    font_extents = font.get_font_extents("ltr")
-    y_max = font_extents.ascender
-    y_min = font_extents.descender
-    x_min = x_max = 0
-
-    x_cursor = 0
-    y_cursor = 0
-    for info, pos in zip(buffer.glyph_infos, buffer.glyph_positions):
-        dx, dy = pos.x_offset, pos.y_offset
-        p = _glyph_to_svg(font, info.codepoint, x_cursor + dx, y_cursor + dy, defs)
-        paths.append(p)
-
-        if extents := font.get_glyph_extents(info.codepoint):
-            cur_x = x_cursor + dx
-            cur_y = y_cursor + dy
-            min_x = cur_x + min(extents.x_bearing, 0)
-            min_y = cur_y + min(extents.height + extents.y_bearing, pos.y_advance)
-            max_x = cur_x + max(extents.width + extents.x_bearing, pos.x_advance)
-            max_y = cur_y + max(extents.y_bearing, 0)
-            x_min = min(x_min, min_x)
-            y_min = min(y_min, min_y)
-            x_max = max(x_max, max_x)
-            y_max = max(y_max, max_y)
-
-        x_cursor += pos.x_advance
-        y_cursor += pos.y_advance
-
-    svg = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{x_min} {y_min} {x_max - x_min} {y_max - y_min}" transform="matrix(1 0 0 -1 0 0)">',
-        "<defs>",
-        *defs.values(),
-        "</defs>",
-        *paths,
-        "</svg>",
-        "",
-    ]
-    return "\n".join(svg)
-
-
-def _buffer_to_svg(
-    font: hb.Font,  # type: ignore
-    buffer: hb.Buffer,  # type: ignore
-    parameters: Dict[str, Any],
-) -> str:
-    import base64
-
-    with _SetVariations(font, parameters.get("variations")):
-        svg = _draw_buffer(font, buffer)
-
-    # Use img tag instead of inline SVG as glyphs will have the same IDs across
-    # files, which is broken when files us different variations or fonts.
-    svg = base64.b64encode(svg.encode("utf-8")).decode("utf-8")
-    img = f'<img src="data:image/svg+xml;base64,{svg}" alt="SVG output">'
-    return img
 
 
 def _buffer_from_string(
@@ -341,7 +147,7 @@ def create_report_item(
     font: hb.Font,  # type: ignore
     message: str,
     text: str | None = None,
-    parameters: Dict[str, Any] = {},
+    parameters: ShapingParameters = {},
     new_buf: hb.Buffer | _FakeBuffer | None = None,  # type: ignore
     old_buf: hb.Buffer | None = None,  # type: ignore
     note: str | None = None,
@@ -361,7 +167,7 @@ def create_report_item(
     if old_buf:
         if isinstance(old_buf, _FakeBuffer):
             try:
-                serialized_old_buf = _serialize_buffer(font, old_buf)
+                serialized_old_buf = serialize_buffer(font, old_buf)
             except Exception:
                 # This may fail if the glyphs are not found in the font
                 serialized_old_buf = None
@@ -371,7 +177,7 @@ def create_report_item(
 
     if new_buf:
         glyphs_only = bool(old_buf and isinstance(old_buf, str))
-        serialized_new_buf = _serialize_buffer(font, new_buf, glyphs_only=glyphs_only)
+        serialized_new_buf = serialize_buffer(font, new_buf, glyphs_only=glyphs_only)
 
     # Report a diff table
     if serialized_old_buf and serialized_new_buf:
@@ -379,11 +185,11 @@ def create_report_item(
 
     # Now draw it as SVG
     if new_buf:
-        message += f"Got: {_buffer_to_svg(font, new_buf, parameters)}\n"
+        message += f"Got: {buffer_to_svg(font, new_buf, parameters)}\n"
 
     if old_buf and isinstance(old_buf, _FakeBuffer):
         try:
-            message += f"Expected: {_buffer_to_svg(font, old_buf, parameters)}"
+            message += f"Expected: {buffer_to_svg(font, old_buf, parameters)}"
         except KeyError:
             pass
 
@@ -391,33 +197,24 @@ def create_report_item(
 
 
 def get_from_test_with_default(
-    test: Dict[str, Any],
-    configuration: Dict[str, Any],
+    test: TestDefinition,
+    configuration: Configuration,
     key: str,
-    default: Any | None = None,
-):
+    default: Any,
+) -> Any:
     defaults = configuration.get("defaults", {})
     return test.get(key, defaults.get(key, default))
 
 
-def get_shaping_parameters(
-    test: Dict[str, Any],
-    configuration: Dict[str, Any],
-):
-    parameters = {}
-    for key in ["script", "language", "direction", "features", "shaper", "variations"]:
-        parameters[key] = get_from_test_with_default(test, configuration, key)
-    return parameters
-
-
 def get_input_strings(
-    test: Dict[str, Any],
-    configuration: Dict[str, Any],
+    test: TestDefinition,
+    configuration: Configuration,
 ) -> list[str]:
     input_type = get_from_test_with_default(test, configuration, "input_type", "string")
     if input_type == "pattern":
         from stringbrewer import StringBrewer
 
+        assert "ingredients" in configuration
         sb = StringBrewer(
             recipe=test["input"],
             ingredients=configuration["ingredients"],
@@ -429,7 +226,7 @@ def get_input_strings(
 # This is a very generic "do something with shaping" test runner.
 # It'll be given concrete meaning later.
 def run_a_set_of_shaping_tests(
-    configuration: Dict[str, Any],
+    configuration: Configuration,
     fontpath: Path,
     run_a_test: Callable,
     test_filter: Callable,
@@ -531,7 +328,7 @@ def run_a_set_of_shaping_tests(
 
 
 def check_shaping_regression(
-    configuration: Dict[str, Any],
+    configuration: Configuration,
     fontpath: Path,
 ) -> Generator[tuple[bool | None, Message]]:
     """Check that texts shape as per expectation"""
@@ -547,18 +344,18 @@ def check_shaping_regression(
 def run_shaping_regression(
     fontpath: Path,
     font: hb.Font,  # type: ignore
-    test: Dict[str, Any],
-    configuration: Dict[str, Any],
+    test: TestDefinition,
+    configuration: Configuration,
     failed_shaping_tests: list,
     extra_data: Dict[str, Any],
 ):
     shaping_text = test["input"]
     parameters = get_shaping_parameters(test, configuration)
-    output_buf = _shape(font, shaping_text, parameters)
+    output_buf = shape(font, shaping_text, parameters)
     expectation = test["expectation"]
     if isinstance(expectation, dict):
         expectation = expectation.get(fontpath.name, expectation["default"])
-    output_serialized = _serialize_buffer(
+    output_serialized = serialize_buffer(
         font,
         output_buf,
         glyphs_only="+" not in expectation,
@@ -570,7 +367,7 @@ def run_shaping_regression(
 
 def generate_shaping_regression_report(
     font: hb.Font,  # type: ignore
-    configuration: Dict[str, Any],
+    configuration: Configuration,
     shaping_file: Path,
     failed_shaping_tests: list,
 ) -> Generator[tuple[bool | None, Message]]:
@@ -605,7 +402,7 @@ def generate_shaping_regression_report(
 
 
 def check_shaping_forbidden(
-    configuration: Dict[str, Any],
+    configuration: Configuration,
     fontpath: Path,
 ) -> Generator[tuple[bool | None, Message]]:
     """Check that no forbidden glyphs are found while shaping"""
@@ -621,19 +418,21 @@ def check_shaping_forbidden(
 def run_forbidden_glyph_test(
     fontpath: Path,
     font: hb.Font,  # type: ignore
-    test: Dict[str, Any],
-    configuration: Dict[str, Any],
+    test: TestDefinition,
+    configuration: Configuration,
     failed_shaping_tests: list,
     extra_data: Dict[str, Any],
 ):
     import re
 
+    assert "forbidden_glyphs" in configuration
+
     parameters = get_shaping_parameters(test, configuration)
     strings = get_input_strings(test, configuration)
     forbidden_glyphs = configuration["forbidden_glyphs"]
     for shaping_text in strings:
-        output_buf = _shape(font, shaping_text, parameters)
-        output_serialized = _serialize_buffer(font, output_buf, glyphs_only=True)
+        output_buf = shape(font, shaping_text, parameters)
+        output_serialized = serialize_buffer(font, output_buf, glyphs_only=True)
         glyph_names = "|" + output_serialized + "|"
         for forbidden in forbidden_glyphs:
             pattern = forbidden
@@ -647,7 +446,7 @@ def run_forbidden_glyph_test(
 
 def forbidden_glyph_test_results(
     font: hb.Font,  # type: ignore
-    configuration: Dict[str, Any],
+    configuration: Configuration,
     shaping_file: Path,
     failed_shaping_tests: list,
 ) -> Generator[tuple[bool | None, Message]]:
@@ -663,7 +462,7 @@ def forbidden_glyph_test_results(
 
 
 def check_shaping_collides(
-    configuration: Dict[str, Any],
+    configuration: Configuration,
     fontpath: Path,
 ) -> Generator[tuple[bool | None, Message]]:
     """Check that no collisions are found while shaping"""
@@ -680,7 +479,7 @@ def check_shaping_collides(
 
 def setup_glyph_collides(
     fontpath: Path,
-    configuration: Dict[str, Any],
+    configuration: Configuration,
 ) -> Dict[str, Any]:
 
     collidoscope_configuration = configuration.get("collidoscope")
@@ -704,8 +503,8 @@ def setup_glyph_collides(
 def run_collides_glyph_test(
     fontpath: Path,
     font: hb.Font,  # type: ignore
-    test: Dict[str, Any],
-    configuration: Dict[str, Any],
+    test: TestDefinition,
+    configuration: Configuration,
     failed_shaping_tests: list,
     extra_data: Dict[str, Any],
 ):
@@ -720,7 +519,7 @@ def run_collides_glyph_test(
         [],
     )
     for shaping_text in strings:
-        output_buf = _shape(font, shaping_text, parameters)
+        output_buf = shape(font, shaping_text, parameters)
         glyphs = col.get_glyphs(shaping_text, buf=output_buf)
         collisions = col.has_collisions(glyphs)
         bumps = [f"{c.glyph1}/{c.glyph2}" for c in collisions]
@@ -732,7 +531,7 @@ def run_collides_glyph_test(
 
 def collides_glyph_test_results(
     font: hb.Font,  # type: ignore
-    configuration: Dict[str, Any],
+    configuration: Configuration,
     shaping_file: Path,
     failed_shaping_tests: list,
 ) -> Generator[tuple[bool | None, Message]]:
@@ -757,7 +556,7 @@ def collides_glyph_test_results(
 
 
 def run_checks(
-    configuration: Dict[str, Any],
+    configuration: Configuration,
     fontpath: Path,
 ):
     return {

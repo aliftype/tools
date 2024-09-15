@@ -24,6 +24,19 @@ from typing import Any, Dict, List, NotRequired, Optional, TypedDict
 import uharfbuzz as hb
 import yaml
 
+from . import (
+    ComparisonMode,
+    Configuration,
+    Direction,
+    ShapingInput,
+    ShapingOutput,
+    ShapingParameters,
+    TestDefinition,
+    get_shaping_parameters,
+    serialize_buffer,
+    shape,
+)
+
 
 def main(args: List[str] | None = None) -> None:
     import argparse
@@ -91,70 +104,6 @@ def update_shaping_output(
     return shaping_output
 
 
-def get_shaping_parameters(
-    input: ShapingInput,
-    configuration: Configuration,
-) -> ShapingParameters:
-    defaults = configuration.get("defaults", ShapingParameters())
-    parameters: ShapingParameters = {}
-    for key in ShapingParameters.__annotations__.keys():
-        if value := input.get(key, defaults.get(key)):
-            parameters[key] = value
-    return parameters
-
-
-def _shape(
-    font: hb.Font,  # type: ignore
-    text: str,
-    parameters: Dict[str, Any],
-) -> hb.Buffer:  # type: ignore
-    buf = hb.Buffer()  # type: ignore
-    buf.add_str(text)
-    buf.guess_segment_properties()
-
-    if script := parameters.get("script"):
-        buf.script = script
-    if direction := parameters.get("direction"):
-        buf.direction = direction
-    if language := parameters.get("language"):
-        buf.language = language
-
-    shapers = []
-    if shaper := parameters.get("shaper"):
-        shapers = [shaper]
-
-    saved_variations = None
-    variations = parameters.get("variations")
-    if variations:
-        saved_variations = font.get_var_coords_design()
-        font.set_variations(variations)
-
-    hb.shape(font, buf, parameters.get("features"), shapers=shapers)  # type: ignore
-
-    if saved_variations is not None:
-        font.set_var_coords_design(saved_variations)
-
-    return buf
-
-
-def _serialize_buffer(
-    font: hb.Font,  # type: ignore
-    buffer: hb.Buffer,  # type: ignore
-    glyphs_only: bool = False,
-) -> str:
-    outs = []
-    for info, pos in zip(buffer.glyph_infos, buffer.glyph_positions):  # type: ignore
-        glyph_name = font.glyph_to_string(info.codepoint)
-        if glyphs_only:
-            outs.append(glyph_name)
-            continue
-        outs.append("%s=%i" % (glyph_name, info.cluster))
-        if pos.position[0] != 0 or pos.position[1] != 0:
-            outs[-1] = outs[-1] + "@%i,%i" % (pos.position[0], pos.position[1])
-        outs[-1] = outs[-1] + "+%i" % (pos.position[2])
-    return "|".join(outs)
-
-
 def shape_run(
     font: hb.Font,  # type: ignore
     font_path: Path,
@@ -163,8 +112,8 @@ def shape_run(
     configuration: Configuration,
 ) -> TestDefinition:
     parameters = get_shaping_parameters(input, configuration)
-    parameters = json.loads(json.dumps(parameters))
-    buffer = _shape(font, text, parameters)
+    parameters: ShapingParameters = json.loads(json.dumps(parameters))
+    buffer = shape(font, text, parameters)
 
     shaping_comparison_mode = input.get("comparison_mode", ComparisonMode.FULL)
     if shaping_comparison_mode is ComparisonMode.FULL:
@@ -173,7 +122,7 @@ def shape_run(
         glyphsonly = True
     else:
         raise ValueError(f"Unknown comparison mode {shaping_comparison_mode}.")
-    expectation = _serialize_buffer(font, buffer, glyphsonly)
+    expectation = serialize_buffer(font, buffer, glyphsonly)
 
     test: TestDefinition = {
         "only": font_path.name,
@@ -206,56 +155,9 @@ def load_shaping_input(input_path: Path) -> ShapingInputYaml:
     return shaping_input
 
 
-class Configuration(TypedDict):
-    defaults: NotRequired[ShapingParameters]
-    forbidden_glyphs: NotRequired[List[str]]
-
-
 class ShapingInputYaml(TypedDict):
     configuration: NotRequired[Configuration]
     input: List[ShapingInput]
-
-
-class ShapingInput(TypedDict):
-    text: List[str]
-    script: Optional[str]
-    language: Optional[str]
-    direction: Optional[Direction]
-    features: Dict[str, bool]
-    comparison_mode: ComparisonMode
-    variations: Optional[Dict[str, float]]
-
-
-class ComparisonMode(enum.StrEnum):
-    FULL = "full"  # Record glyph names, offsets and advance widths.
-    GLYPHSTREAM = "glyphstream"  # Just glyph names.
-
-
-class Direction(enum.StrEnum):
-    LEFT_TO_RIGHT = "ltr"
-    RIGHT_TO_LEFT = "rtl"
-    TOP_TO_BOTTOM = "ttb"
-    BOTTOM_TO_TOP = "btt"
-
-
-class ShapingOutput(TypedDict):
-    configuration: NotRequired[Configuration]
-    tests: List[TestDefinition]
-
-
-class ShapingParameters(TypedDict, total=False):
-    script: str
-    direction: str
-    language: str
-    features: Dict[str, bool]
-    shaper: str
-    variations: Dict[str, float]
-
-
-class TestDefinition(ShapingParameters):
-    input: str
-    expectation: str
-    only: NotRequired[str]
 
 
 if __name__ == "__main__":

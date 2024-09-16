@@ -1,6 +1,8 @@
 from enum import StrEnum
 from typing import Any, Dict, List, NotRequired, Optional, TypedDict
 
+import uharfbuzz as hb  # type: ignore
+
 
 class Direction(StrEnum):
     LEFT_TO_RIGHT = "ltr"
@@ -84,6 +86,33 @@ class _SetVariations:
             self.font.set_var_coords_design(self.saved_variations)
 
 
+class FakeBuffer:
+    def __init__(self):
+        self.glyph_infos: list[FakeItem] = []
+        self.glyph_positions: list[FakeItem] = []
+
+
+class FakeItem:
+    def __init__(
+        self,
+        codepoint=0,
+        cluster=0,
+        name=None,
+        x_offset=0,
+        y_offset=0,
+        x_advance=0,
+        y_advance=0,
+    ):
+        self.codepoint = codepoint
+        self.cluster = cluster
+        self.name = name
+        self.x_offset = x_offset
+        self.y_offset = y_offset
+        self.x_advance = x_advance
+        self.y_advance = y_advance
+        self.position = [x_offset, y_offset, x_advance, y_advance]
+
+
 def shape(
     font: hb.Font,  # type: ignore
     text: str,
@@ -112,7 +141,7 @@ def shape(
 
 def serialize_buffer(
     font: hb.Font,  # type: ignore
-    buffer: hb.Buffer | _FakeBuffer,  # type: ignore
+    buffer: hb.Buffer | FakeBuffer,  # type: ignore
     glyphs_only: bool = False,
 ) -> str:
     outs = []

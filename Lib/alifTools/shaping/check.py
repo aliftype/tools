@@ -31,6 +31,8 @@ from . import (
     get_shaping_parameters,
     serialize_buffer,
     shape,
+    FakeBuffer,
+    FakeItem,
 )
 
 
@@ -45,33 +47,6 @@ class Message:
         self.code = code
         self.header = header
         self.items = items
-
-
-class _FakeBuffer:
-    def __init__(self):
-        self.glyph_infos: list[_FakeItem] = []
-        self.glyph_positions: list[_FakeItem] = []
-
-
-class _FakeItem:
-    def __init__(
-        self,
-        codepoint=0,
-        cluster=0,
-        name=None,
-        x_offset=0,
-        y_offset=0,
-        x_advance=0,
-        y_advance=0,
-    ):
-        self.codepoint = codepoint
-        self.cluster = cluster
-        self.name = name
-        self.x_offset = x_offset
-        self.y_offset = y_offset
-        self.x_advance = x_advance
-        self.y_advance = y_advance
-        self.position = [x_offset, y_offset, x_advance, y_advance]
 
 
 def fix_svg(svg: str) -> str:
@@ -112,10 +87,10 @@ def diff(
 def _buffer_from_string(
     font: hb.Font,  # type: ignore
     text: str,
-) -> _FakeBuffer:
+) -> FakeBuffer:
     import re
 
-    buffer = _FakeBuffer()
+    buffer = FakeBuffer()
     buffer.glyph_infos = []
     buffer.glyph_positions = []
     for item in text.split("|"):
@@ -124,7 +99,7 @@ def _buffer_from_string(
             raise ValueError("Couldn't parse glyph %s in %s" % (item, text))
         groups = m.groups()
 
-        info = _FakeItem(
+        info = FakeItem(
             codepoint=font.glyph_from_string(groups[0]),
             cluster=int(groups[1]),
         )
@@ -133,7 +108,7 @@ def _buffer_from_string(
             info.name = groups[0]
         buffer.glyph_infos.append(info)
 
-        pos = _FakeItem(
+        pos = FakeItem(
             x_offset=int(groups[3] or 0),
             y_offset=int(groups[4] or 0),
             x_advance=int(groups[6] or 0),
@@ -148,7 +123,7 @@ def create_report_item(
     message: str,
     text: str | None = None,
     parameters: ShapingParameters = {},
-    new_buf: hb.Buffer | _FakeBuffer | None = None,  # type: ignore
+    new_buf: hb.Buffer | FakeBuffer | None = None,  # type: ignore
     old_buf: hb.Buffer | None = None,  # type: ignore
     note: str | None = None,
     extra_data: Dict | None = None,
@@ -165,7 +140,7 @@ def create_report_item(
     serialized_new_buf = None
     serialized_old_buf = None
     if old_buf:
-        if isinstance(old_buf, _FakeBuffer):
+        if isinstance(old_buf, FakeBuffer):
             try:
                 serialized_old_buf = serialize_buffer(font, old_buf)
             except Exception:
@@ -187,7 +162,7 @@ def create_report_item(
     if new_buf:
         message += f"Got: {buffer_to_svg(font, new_buf, parameters)}\n"
 
-    if old_buf and isinstance(old_buf, _FakeBuffer):
+    if old_buf and isinstance(old_buf, FakeBuffer):
         try:
             message += f"Expected: {buffer_to_svg(font, old_buf, parameters)}"
         except KeyError:

@@ -218,11 +218,11 @@ def _glyph_to_svg(font, gid, x, y, defs):
     transform = f'transform="translate({x},{y})"'
     svg = [f"<g {transform}>"]
     face = font.face
-    if (layers := hb.ot_color_glyph_get_layers(face, gid)) and (palette := hb.ot_color_palette_get_colors(face, 0)):  # type: ignore
+    if (layers := face.get_glyph_color_layers(gid)) and (palettes := face.color_palettes):  # type: ignore
         for layer in layers:
             id = _glyph_to_svg_id(font, layer.glyph, defs)
             if layer.color_index != 0xFFFF:
-                color = _to_svg_color(palette[layer.color_index])
+                color = _to_svg_color(palettes[0].colors[layer.color_index])
                 svg.append(f'<use href="#{id}" fill="{color}"/>')
             else:
                 svg.append(f'<use href="#{id}"/>')

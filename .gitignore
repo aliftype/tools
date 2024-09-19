@@ -1,3 +1,4 @@
 /build
+/venv
 Lib/alifTools/_version.py
 *.egg-info

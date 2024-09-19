@@ -10,7 +10,7 @@ readme = "README.md"
 dynamic = ["version"]
 authors = [{ name = "Khaled Hosny", email = "khaled@aliftype.com" }]
 classifiers = ['Environment :: Console', 'Topic :: Text Processing :: Fonts']
-dependencies = ["uharfbuzz>=0.39.5"]
+dependencies = ["uharfbuzz>=0.40.0"]
 
 [project.optional-dependencies]
 shaping = ["json", "yaml"]

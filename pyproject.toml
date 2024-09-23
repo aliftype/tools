@@ -13,7 +13,7 @@ classifiers = ['Environment :: Console', 'Topic :: Text Processing :: Fonts']
 dependencies = ["uharfbuzz>=0.40.0"]
 
 [project.optional-dependencies]
-shaping = ["json", "yaml"]
+shaping = ["pyyaml"]
 sample = ["blackrenderer"]
 
 [project.urls]

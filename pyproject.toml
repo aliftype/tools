@@ -10,11 +10,12 @@ readme = "README.md"
 dynamic = ["version"]
 authors = [{ name = "Khaled Hosny", email = "khaled@aliftype.com" }]
 classifiers = ['Environment :: Console', 'Topic :: Text Processing :: Fonts']
-dependencies = ["uharfbuzz>=0.40.0"]
+dependencies = []
 
 [project.optional-dependencies]
-shaping = ["pyyaml"]
-sample = ["blackrenderer"]
+shaping = ["pyyaml", "uharfbuzz>=0.40.0"]
+sample = ["blackrenderer", "uharfbuzz"]
+filters = ["ufo2ft"]
 
 [project.urls]
 Repository = "https://github.com/aliftype/tools"

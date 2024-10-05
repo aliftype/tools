@@ -13,11 +13,14 @@
 # limitations under the License.
 
 import argparse
+import pathlib
+import io
 
 import uharfbuzz as hb
-from blackrenderer.backends.svg import SVGSurface
+from blackrenderer.backends.svg import SVGSurface, writeSVGElements
 from blackrenderer.font import BlackRendererFont
 from blackrenderer.render import buildGlyphLine, calcGlyphLineBounds
+from fontTools.misc import etree as ET
 from fontTools.misc.arrayTools import insetRect, offsetRect, unionRect
 
 
@@ -58,19 +61,48 @@ def makeLine(buf, font, y):
     return line, rect, height
 
 
-def draw(
+def set_dark_colors(
     surface: SVGSurface,
-    path: str,
+    foreground: None | str,
+    background: None | str,
+    dark_foreground: None | str,
+    dark_background: None | str,
+    output: pathlib.Path,
+):
+    css = ["@media (prefers-color-scheme: dark) {"]
+    if dark_foreground:
+        css += [f'path[fill="#{foreground}"] {{', f" fill: #{dark_foreground};", " }"]
+    if dark_background:
+        css += [f'path[fill="#{background}"] {{', f" fill: #{dark_background};", " }"]
+    css += ["}"]
+
+    svg_file = io.BytesIO()
+    writeSVGElements(surface._svgElements, surface._viewBox, svg_file)
+    svg_file.seek(0)
+
+    tree: ET.ElementTree = ET.parse(svg_file)
+    root = tree.getroot()
+    style = ET.SubElement(root, "style")
+    style.text = "\n" + "\n".join(css) + "\n"
+
+    tree.write(output, pretty_print=True, xml_declaration=True)
+
+
+def draw(
+    font_path: str,
     text: str,
     features: str,
-    foreground: None | tuple[int, int, int, int],
-    background: None | tuple[int, int, int, int],
+    foreground: None | str,
+    background: None | str,
+    dark_foreground: None | str,
+    dark_background: None | str,
+    output_path: pathlib.Path,
 ):
     margin = 100
     bounds = None
     lines = []
     y = margin
-    font = BlackRendererFont(path)
+    font = BlackRendererFont(font_path)
     locations = [None]
     if "fvar" in font.ttFont:
         locations = sorted(
@@ -78,7 +110,7 @@ def draw(
             key=lambda x: x.get("wght"),
         )
     for location in reversed(locations):
-        font = BlackRendererFont(path)
+        font = BlackRendererFont(font_path)
         if location is not None:
             font.setLocation(location)
 
@@ -96,10 +128,17 @@ def draw(
             bounds = unionRect(bounds, rect)
             y += height + margin
 
+    if dark_foreground and not foreground:
+        foreground = "000000"
+    if dark_background and not background:
+        background = "FFFFFF"
+
+    surface = SVGSurface()
+
     bounds = insetRect(bounds, -margin, -margin)
     with surface.canvas(bounds) as canvas:
         if background:
-            canvas.drawRectSolid(surface._viewBox, background)
+            canvas.drawRectSolid(surface._viewBox, parseColor(background))
         for font, line, rect, y in lines:
             with canvas.savedState():
                 # Center align the line.
@@ -109,10 +148,26 @@ def draw(
                     with canvas.savedState():
                         canvas.translate(glyph.xOffset, glyph.yOffset)
                         if foreground:
-                            font.drawGlyph(glyph.name, canvas, textColor=foreground)
+                            font.drawGlyph(
+                                glyph.name,
+                                canvas,
+                                textColor=parseColor(foreground),
+                            )
                         else:
                             font.drawGlyph(glyph.name, canvas)
                     canvas.translate(glyph.xAdvance, glyph.yAdvance)
+
+    if dark_foreground or dark_background:
+        set_dark_colors(
+            surface,
+            foreground,
+            background,
+            dark_foreground,
+            dark_background,
+            output_path,
+        )
+        return
+    surface.saveImage(output_path)
 
 
 def parseColor(color):
@@ -127,20 +182,28 @@ def main(argv=None):
     parser.add_argument("font", help="input font")
     parser.add_argument("-t", "--text", help="input text", required=True)
     parser.add_argument("-f", "--features", help="input features")
-    parser.add_argument("-o", "--output", help="output SVG", required=True)
-    parser.add_argument("--foreground", help="foreground color", type=parseColor)
-    parser.add_argument("--background", help="background color", type=parseColor)
+    parser.add_argument(
+        "-o",
+        "--output",
+        help="output SVG",
+        required=True,
+        type=pathlib.Path,
+    )
+    parser.add_argument("--foreground", help="foreground color")
+    parser.add_argument("--background", help="background color")
+    parser.add_argument("--dark-foreground", help="foreground color (dark theme)")
+    parser.add_argument("--dark-background", help="background color (dark theme)")
 
     args = parser.parse_args(argv)
 
-    surface = SVGSurface()
     features = parseFeatures(args.features)
     draw(
-        surface,
         args.font,
         args.text,
         features,
         args.foreground,
         args.background,
+        args.dark_foreground,
+        args.dark_background,
+        args.output,
     )
-    surface.saveImage(args.output)

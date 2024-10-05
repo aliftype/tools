@@ -83,7 +83,7 @@ def update_shaping_output(
         font = hb.Font(face)  # type: ignore
         for input in shaping_input["input"]:
             for text in input["text"]:
-                if face.has_var_data and "variations" not in shaping_input["input"]:
+                if face.has_var_data and "variations" not in input:
                     axis_tags = [axis.tag for axis in face.axis_infos]
                     for instance in face.named_instances:
                         instance_input = input.copy()

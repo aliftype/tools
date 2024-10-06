@@ -158,6 +158,39 @@ class Font:
         glyphs = self._make_glyphs(buf)
         return glyphs, width
 
+    def shape_justify(
+        self,
+        text: str,
+        location: dict[str, int],
+        features: str,
+        target_width: float,
+    ):
+        buf = hb.Buffer()
+        features = self._parse_features(features)
+
+        width = self._shape(buf, text, location, features)
+        if width >= target_width:
+            return self._make_glyphs(buf), width, location
+
+        if (axis := next((a for a in self.axes if a.tag == "MSHQ"), None)) is None:
+            return self._make_glyphs(buf), width, location
+
+        location = {axis.tag: axis.max_value}
+        max_width = self._shape(buf, text, location, features)
+
+        location[axis.tag], width = solve_itp(
+            lambda x: self._shape(buf, text, {axis.tag: x}, features),
+            axis.default_value,
+            axis.max_value,
+            (axis.max_value - axis.default_value) / (1 << 14),
+            target_width,
+            target_width,
+            width,
+            max_width,
+        )
+
+        return self._make_glyphs(buf), width, location
+
     def _glyph_bounds(
         self,
         name: str,
@@ -215,13 +248,61 @@ class GlyphLine(NamedTuple):
         x: float,
         y: float,
         location: dict[str, int],
+        target_width: float | None = None,
     ) -> "GlyphLine":
 
-        glyphs, width = font.shape(text, location, features)
+        if target_width is not None:
+            glyphs, width, location = font.shape_justify(
+                text, location, features, target_width
+            )
+        else:
+            glyphs, width = font.shape(text, location, features)
+
         rect = font.calc_glyph_bounds(glyphs).offset(0, y)
         height = -rect.yMin + rect.yMax
 
         return cls(font, glyphs, rect, x, y, width, height, location)
+
+
+# Ported from HarfBuzz:
+# https://github.com/harfbuzz/harfbuzz/blob/b6196986d7f17cd5d6aebec88b527726b1493a9c/src/hb-algs.hh#L1511
+def solve_itp(f, a, b, epsilon, min_y, max_y, ya, yb):
+    import math
+
+    n1_2 = max(math.ceil(math.log2((b - a) / epsilon)) - 1.0, 0.0)
+    n0 = 1  # Hardwired
+    k1 = 0.2 / (b - a)  # Hardwired.
+    n_max = n0 + int(n1_2)
+    scaled_epsilon = epsilon * (1 << n_max)
+    _2_epsilon = 2.0 * epsilon
+
+    y_itp = 0
+
+    while b - a > _2_epsilon:
+        x1_2 = 0.5 * (a + b)
+        r = scaled_epsilon - 0.5 * (b - a)
+        xf = (yb * a - ya * b) / (yb - ya)
+        sigma = x1_2 - xf
+        b_a = b - a
+        b_a_k2 = b_a * b_a
+        delta = k1 * b_a_k2
+        sigma_sign = 1 if sigma >= 0 else -1
+        xt = xf + delta * sigma_sign if delta <= abs(x1_2 - xf) else x1_2
+        x_itp = xt if abs(xt - x1_2) <= r else x1_2 - r * sigma_sign
+        y_itp = f(x_itp)
+
+        if y_itp > max_y:
+            b = x_itp
+            yb = y_itp
+        elif y_itp < min_y:
+            a = x_itp
+            ya = y_itp
+        else:
+            return x_itp, y_itp
+
+        scaled_epsilon *= 0.5
+
+    return 0.5 * (a + b), y_itp
 
 
 def set_dark_colors(
@@ -262,6 +343,7 @@ def draw(
     background: None | str,
     dark_foreground: None | str,
     dark_background: None | str,
+    justify: bool,
     output_path: pathlib.Path,
 ):
     margin = 100
@@ -275,18 +357,46 @@ def draw(
         font.set_location(location)
 
         text_lines = list(reversed(text.split("\n")))
-        for text_line in text_lines:
-            line = GlyphLine.build(
-                font,
-                text_line,
-                features,
-                margin,
-                y,
-                location,
-            )
-            lines.append(line)
-            bounds = line.rect.union(bounds)
-            y += line.height + margin
+        if justify:
+            max_width = 0
+            for text_line in text_lines:
+                line = GlyphLine.build(
+                    font,
+                    text_line,
+                    features,
+                    margin,
+                    y,
+                    location,
+                )
+                max_width = max(max_width, line.width)
+
+            font.set_location(location)
+            for text_line in text_lines:
+                line = GlyphLine.build(
+                    font,
+                    text_line,
+                    features,
+                    margin,
+                    y,
+                    location,
+                    max_width,
+                )
+                lines.append(line)
+                bounds = line.rect.union(bounds)
+                y += line.height + margin
+        else:
+            for text_line in text_lines:
+                line = GlyphLine.build(
+                    font,
+                    text_line,
+                    features,
+                    margin,
+                    y,
+                    location,
+                )
+                lines.append(line)
+                bounds = line.rect.union(bounds)
+                y += line.height + margin
 
     if dark_foreground and not foreground:
         foreground = "000000"
@@ -348,6 +458,7 @@ def main(argv=None):
     parser.add_argument("--background", help="background color")
     parser.add_argument("--dark-foreground", help="foreground color (dark theme)")
     parser.add_argument("--dark-background", help="background color (dark theme)")
+    parser.add_argument("--justify", help="justify text", action="store_true")
 
     args = parser.parse_args(argv)
 
@@ -359,5 +470,6 @@ def main(argv=None):
         args.background,
         args.dark_foreground,
         args.dark_background,
+        args.justify,
         args.output,
     )

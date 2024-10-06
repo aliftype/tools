@@ -15,50 +15,213 @@
 import argparse
 import pathlib
 import io
+from functools import cached_property
+from typing import NamedTuple
 
 import uharfbuzz as hb
-from blackrenderer.backends.svg import SVGSurface, writeSVGElements
-from blackrenderer.font import BlackRendererFont
-from blackrenderer.render import buildGlyphLine, calcGlyphLineBounds
-from fontTools.misc import etree as ET
-from fontTools.misc.arrayTools import insetRect, offsetRect, unionRect
+from blackrenderer.backends.svg import SVGSurface
 
 
-def parseFeatures(text):
-    if not text:
-        return {}
-    features = {}
-    for feature in text.split(","):
-        value = 1
-        start = 0
-        end = -1
-        if feature[0] == "-":
-            value = 0
-        if feature[0] in ("+", "-"):
-            feature = feature[1:]
-        tag = feature
-        if "[" in feature:
-            tag, extra = feature.split("[")
-            if "=" in extra:
-                extra, value = extra.split("=")
-            if extra[-1] == "]":
-                extra = extra[:-1]
-                start = end = extra
-                if ":" in extra:
-                    start, end = extra.split(":")
-        features[tag] = [[int(value), int(start), int(end)]]
-    return features
+class Rect(NamedTuple):
+    xMin: float
+    yMin: float
+    xMax: float
+    yMax: float
+
+    def offset(self, x, y):
+        from fontTools.misc.arrayTools import offsetRect
+
+        return Rect(*offsetRect(self, x, y))
+
+    def inset(self, x, y):
+        from fontTools.misc.arrayTools import insetRect
+
+        return Rect(*insetRect(self, x, y))
+
+    def union(self, other: "Rect") -> "Rect":
+        from fontTools.misc.arrayTools import unionRect
+
+        if other is None:
+            return self
+        return Rect(*unionRect(self, other))
 
 
-def makeLine(buf, font, y):
-    line = buildGlyphLine(buf.glyph_infos, buf.glyph_positions, font.glyphNames)
+class GlyphInfo(NamedTuple):
+    name: str
+    glyph: int
+    x_advance: float
+    y_advance: float
+    x_offset: float
+    y_offset: float
 
-    xMin, yMin, xMax, yMax = calcGlyphLineBounds(line, font)
-    rect = offsetRect((xMin, yMin, xMax, yMax), 0, y)
 
-    height = -yMin + yMax
+class Font:
+    def __init__(self, path: str):
+        from blackrenderer.font import BlackRendererFont
 
-    return line, rect, height
+        self.path = path
+        self.brFont = BlackRendererFont(path)
+        self._location = None
+
+    @cached_property
+    def axes(self):
+        return self.brFont.hbFont.face.axis_infos
+
+    @cached_property
+    def instances(self):
+        return self.brFont.hbFont.face.named_instances
+
+    @cached_property
+    def locations(self):
+        instances = [i.design_coords for i in self.instances]
+        axes = [a.tag for a in self.axes]
+        locations = [dict(zip(axes, instance)) for instance in instances]
+        return locations
+
+    @property
+    def location(self):
+        if self._location is None:
+            self._location = {a.tag: a.default_value for a in self.axes}
+        return self._location
+
+    def set_location(
+        self,
+        location: dict[str, int],
+    ):
+        self._location = location
+        self.brFont.setLocation(location)
+
+    def _shape(
+        self,
+        buf: hb.Buffer,
+        text: str,
+        location: dict[str, int],
+        features: dict[str, list[list[int]]],
+    ) -> float:
+        self.set_location(location)
+        buf.reset()
+        buf.add_str(text)
+        buf.guess_segment_properties()
+        hb.shape(self.brFont.hbFont, buf, features=features)
+        return sum(g.x_advance for g in buf.glyph_positions)
+
+    def _make_glyphs(self, buf: hb.Buffer) -> list[GlyphInfo]:
+        glyphs = []
+        for info, pos in zip(buf.glyph_infos, buf.glyph_positions):
+            glyphs.append(
+                GlyphInfo(
+                    name=self.brFont.glyphNames[info.codepoint],
+                    glyph=info.codepoint,
+                    x_advance=pos.x_advance,
+                    y_advance=pos.y_advance,
+                    x_offset=pos.x_offset,
+                    y_offset=pos.y_offset,
+                )
+            )
+        return glyphs
+
+    @staticmethod
+    def _parse_features(text: str) -> dict[str, list[list[int]]]:
+        if not text:
+            return {}
+        features = {}
+        for feature in text.split(","):
+            value = 1
+            start = 0
+            end = -1
+            if feature[0] == "-":
+                value = 0
+            if feature[0] in ("+", "-"):
+                feature = feature[1:]
+            tag = feature
+            if "[" in feature:
+                tag, extra = feature.split("[")
+                if "=" in extra:
+                    extra, value = extra.split("=")
+                if extra[-1] == "]":
+                    extra = extra[:-1]
+                    start = end = extra
+                    if ":" in extra:
+                        start, end = extra.split(":")
+            features[tag] = [[int(value), int(start), int(end)]]
+        return features
+
+    def shape(
+        self,
+        text: str,
+        location: dict[str, int],
+        features: str,
+    ) -> list[GlyphInfo]:
+        buf = hb.Buffer()
+        features = self._parse_features(features)
+        width = self._shape(buf, text, location, features)
+        glyphs = self._make_glyphs(buf)
+        return glyphs, width
+
+    def _glyph_bounds(
+        self,
+        name: str,
+    ) -> None | Rect:
+        bounds = self.brFont.getGlyphBounds(name)
+        return Rect(*bounds) if bounds is not None else None
+
+    def calc_glyph_bounds(
+        self,
+        glyphs: list[GlyphInfo],
+    ) -> Rect:
+        bounds = None
+        x, y = 0, 0
+        for glyph in glyphs:
+            glyph_bounds = self._glyph_bounds(glyph.name)
+            if glyph_bounds is None:
+                continue
+            glyph_bounds = glyph_bounds.offset(
+                x + glyph.x_offset,
+                y + glyph.y_offset,
+            )
+            x += glyph.x_advance
+            y += glyph.y_advance
+            bounds = glyph_bounds.union(bounds)
+        return bounds
+
+    def draw_glyph(
+        self,
+        glyph: GlyphInfo,
+        canvas,
+        foreground=None,
+    ):
+        if foreground is not None:
+            self.brFont.drawGlyph(glyph.name, canvas, textColor=parseColor(foreground))
+        else:
+            self.brFont.drawGlyph(glyph.name, canvas)
+
+
+class GlyphLine(NamedTuple):
+    font: Font
+    glyphs: list[GlyphInfo]
+    rect: Rect
+    x: float
+    y: float
+    width: float
+    height: float
+    location: dict[str, int] | None = None
+
+    @classmethod
+    def build(
+        cls,
+        font: Font,
+        text: str,
+        features: str,
+        x: float,
+        y: float,
+        location: dict[str, int],
+    ) -> "GlyphLine":
+
+        glyphs, width = font.shape(text, location, features)
+        rect = font.calc_glyph_bounds(glyphs).offset(0, y)
+        height = -rect.yMin + rect.yMax
+
+        return cls(font, glyphs, rect, x, y, width, height, location)
 
 
 def set_dark_colors(
@@ -69,6 +232,9 @@ def set_dark_colors(
     dark_background: None | str,
     output: pathlib.Path,
 ):
+    from blackrenderer.backends.svg import writeSVGElements
+    from fontTools.misc import etree as ET
+
     css = ["@media (prefers-color-scheme: dark) {"]
     if dark_foreground:
         css += [f'path[fill="#{foreground}"] {{', f" fill: #{dark_foreground};", " }"]
@@ -100,33 +266,27 @@ def draw(
 ):
     margin = 100
     bounds = None
-    lines = []
+    lines: list[GlyphLine] = []
     y = margin
-    font = BlackRendererFont(font_path)
-    locations = [None]
-    if "fvar" in font.ttFont:
-        locations = sorted(
-            [i.coordinates for i in font.ttFont["fvar"].instances],
-            key=lambda x: x.get("wght"),
-        )
+    font = Font(font_path)
+
+    locations = font.locations
     for location in reversed(locations):
-        font = BlackRendererFont(font_path)
-        if location is not None:
-            font.setLocation(location)
+        font.set_location(location)
 
-        for textLine in reversed(text.split("\n")):
-            buf = hb.Buffer()
-            buf.add_str(textLine)
-            buf.guess_segment_properties()
-            hb.shape(font.hbFont, buf, features)
-
-            line, rect, height = makeLine(buf, font, y)
-            lines.append((font, line, rect, y))
-
-            if bounds is None:
-                bounds = rect
-            bounds = unionRect(bounds, rect)
-            y += height + margin
+        text_lines = list(reversed(text.split("\n")))
+        for text_line in text_lines:
+            line = GlyphLine.build(
+                font,
+                text_line,
+                features,
+                margin,
+                y,
+                location,
+            )
+            lines.append(line)
+            bounds = line.rect.union(bounds)
+            y += line.height + margin
 
     if dark_foreground and not foreground:
         foreground = "000000"
@@ -135,27 +295,22 @@ def draw(
 
     surface = SVGSurface()
 
-    bounds = insetRect(bounds, -margin, -margin)
+    bounds = bounds.inset(-margin, -margin)
     with surface.canvas(bounds) as canvas:
         if background:
             canvas.drawRectSolid(surface._viewBox, parseColor(background))
-        for font, line, rect, y in lines:
+        for line in lines:
+            font = line.font
+            font.set_location(line.location)
             with canvas.savedState():
                 # Center align the line.
-                x = (bounds[2] - rect[2]) / 2 - margin
-                canvas.translate(x, y)
-                for glyph in line:
+                x = (bounds[2] - line.rect[2]) / 2 - margin
+                canvas.translate(x, line.y)
+                for glyph in line.glyphs:
                     with canvas.savedState():
-                        canvas.translate(glyph.xOffset, glyph.yOffset)
-                        if foreground:
-                            font.drawGlyph(
-                                glyph.name,
-                                canvas,
-                                textColor=parseColor(foreground),
-                            )
-                        else:
-                            font.drawGlyph(glyph.name, canvas)
-                    canvas.translate(glyph.xAdvance, glyph.yAdvance)
+                        canvas.translate(glyph.x_offset, glyph.y_offset)
+                        font.draw_glyph(glyph, canvas, foreground)
+                    canvas.translate(glyph.x_advance, glyph.y_advance)
 
     if dark_foreground or dark_background:
         set_dark_colors(
@@ -196,11 +351,10 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
 
-    features = parseFeatures(args.features)
     draw(
         args.font,
         args.text,
-        features,
+        args.features,
         args.foreground,
         args.background,
         args.dark_foreground,

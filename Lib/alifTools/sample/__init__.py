@@ -47,7 +47,6 @@ class Rect(NamedTuple):
 
 
 class GlyphInfo(NamedTuple):
-    name: str
     glyph: int
     x_advance: float
     y_advance: float
@@ -118,7 +117,6 @@ class Font:
         for info, pos in zip(buf.glyph_infos, buf.glyph_positions):
             glyphs.append(
                 GlyphInfo(
-                    name=self.brFont.glyphNames[info.codepoint],
                     glyph=info.codepoint,
                     x_advance=pos.x_advance,
                     y_advance=pos.y_advance,
@@ -232,10 +230,11 @@ class Font:
         canvas,
         foreground=None,
     ):
+        glyph_name = self.brFont.glyphNames[glyph.glyph]
         if foreground is not None:
-            self.brFont.drawGlyph(glyph.name, canvas, textColor=parseColor(foreground))
+            self.brFont.drawGlyph(glyph_name, canvas, textColor=parseColor(foreground))
         else:
-            self.brFont.drawGlyph(glyph.name, canvas)
+            self.brFont.drawGlyph(glyph_name, canvas)
 
 
 class GlyphLine(NamedTuple):

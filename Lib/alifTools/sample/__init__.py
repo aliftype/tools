@@ -196,9 +196,9 @@ class Font:
     def _glyph_bounds(
         self,
         name: str,
-    ) -> None | Rect:
+    ) -> Rect:
         bounds = self.brFont.getGlyphBounds(name)
-        return Rect(*bounds) if bounds is not None else None
+        return Rect(*bounds)
 
     def calc_glyph_bounds(
         self,
@@ -207,10 +207,7 @@ class Font:
         bounds = None
         x, y = 0, 0
         for glyph in glyphs:
-            glyph_bounds = self._glyph_bounds(glyph.name)
-            if glyph_bounds is None:
-                continue
-            glyph_bounds = glyph_bounds.offset(
+            glyph_bounds = self._glyph_bounds(glyph.name).offset(
                 x + glyph.x_offset,
                 y + glyph.y_offset,
             )

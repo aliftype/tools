@@ -58,18 +58,24 @@ class GlyphInfo(NamedTuple):
 class Font:
     def __init__(self, path: str):
         from blackrenderer.font import BlackRendererFont
+        from fontTools.ttLib import TTFont
 
         self.path = path
-        self.brFont = BlackRendererFont(path)
+        blob = hb.Blob.from_file_path(path)
+        face = hb.Face(blob)
+        hbFont = hb.Font(face)
+        ttFont = TTFont(path)
+        self.brFont = BlackRendererFont(path=None, hbFont=hbFont, ttFont=ttFont)
+        self.hbFont = hbFont
         self._location = None
 
     @cached_property
     def axes(self):
-        return self.brFont.hbFont.face.axis_infos
+        return self.hbFont.face.axis_infos
 
     @cached_property
     def instances(self):
-        return self.brFont.hbFont.face.named_instances
+        return self.hbFont.face.named_instances
 
     @cached_property
     def locations(self):
@@ -104,7 +110,7 @@ class Font:
         buf.reset()
         buf.add_str(text)
         buf.guess_segment_properties()
-        hb.shape(self.brFont.hbFont, buf, features=features)
+        hb.shape(self.hbFont, buf, features=features)
         return sum(g.x_advance for g in buf.glyph_positions)
 
     def _make_glyphs(self, buf: hb.Buffer) -> list[GlyphInfo]:
@@ -197,7 +203,7 @@ class Font:
         self,
         glyph: GlyphInfo,
     ) -> Rect:
-        extents = self.brFont.hbFont.get_glyph_extents(glyph.glyph)
+        extents = self.hbFont.get_glyph_extents(glyph.glyph)
         xMin = extents.x_bearing
         yMin = extents.y_bearing + extents.height
         xMax = extents.x_bearing + extents.width

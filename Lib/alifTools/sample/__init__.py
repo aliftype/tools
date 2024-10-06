@@ -74,6 +74,8 @@ class Font:
     @cached_property
     def locations(self):
         instances = [i.design_coords for i in self.instances]
+        if not instances:
+            return [{}]
         axes = [a.tag for a in self.axes]
         locations = [dict(zip(axes, instance)) for instance in instances]
         return locations

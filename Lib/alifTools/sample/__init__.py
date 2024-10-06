@@ -56,17 +56,19 @@ class GlyphInfo(NamedTuple):
 
 class Font:
     def __init__(self, path: str):
-        from blackrenderer.font import BlackRendererFont
-        from fontTools.ttLib import TTFont
 
         self.path = path
         blob = hb.Blob.from_file_path(path)
         face = hb.Face(blob)
-        hbFont = hb.Font(face)
-        ttFont = TTFont(path)
-        self.brFont = BlackRendererFont(path=None, hbFont=hbFont, ttFont=ttFont)
-        self.hbFont = hbFont
+        self.hbFont = hb.Font(face)
         self._location = None
+
+    @cached_property
+    def brFont(self):
+        from blackrenderer.font import BlackRendererFont
+        from fontTools.ttLib import TTFont
+
+        return BlackRendererFont(hbFont=self.hbFont, ttFont=TTFont(self.path))
 
     @cached_property
     def axes(self):
@@ -96,7 +98,7 @@ class Font:
         location: dict[str, int],
     ):
         self._location = location
-        self.brFont.setLocation(location)
+        self.hbFont.set_variations(location)
 
     def _shape(
         self,
@@ -230,11 +232,12 @@ class Font:
         canvas,
         foreground=None,
     ):
-        glyph_name = self.brFont.glyphNames[glyph.glyph]
+        brFont = self.brFont
+        glyph_name = brFont.glyphNames[glyph.glyph]
         if foreground is not None:
-            self.brFont.drawGlyph(glyph_name, canvas, textColor=parseColor(foreground))
+            brFont.drawGlyph(glyph_name, canvas, textColor=parseColor(foreground))
         else:
-            self.brFont.drawGlyph(glyph_name, canvas)
+            brFont.drawGlyph(glyph_name, canvas)
 
 
 class GlyphLine(NamedTuple):

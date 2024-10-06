@@ -195,10 +195,14 @@ class Font:
 
     def _glyph_bounds(
         self,
-        name: str,
+        glyph: GlyphInfo,
     ) -> Rect:
-        bounds = self.brFont.getGlyphBounds(name)
-        return Rect(*bounds)
+        extents = self.brFont.hbFont.get_glyph_extents(glyph.glyph)
+        xMin = extents.x_bearing
+        yMin = extents.y_bearing + extents.height
+        xMax = extents.x_bearing + extents.width
+        yMax = extents.y_bearing
+        return Rect(xMin, yMin, xMax, yMax)
 
     def calc_glyph_bounds(
         self,
@@ -207,7 +211,7 @@ class Font:
         bounds = None
         x, y = 0, 0
         for glyph in glyphs:
-            glyph_bounds = self._glyph_bounds(glyph.name).offset(
+            glyph_bounds = self._glyph_bounds(glyph).offset(
                 x + glyph.x_offset,
                 y + glyph.y_offset,
             )

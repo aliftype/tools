@@ -1,4 +1,4 @@
 Alif Tools
 ==========
 
-Helper tools for Alif Type Foundry.
+Helper tools for building Alif Type Foundry fonts.

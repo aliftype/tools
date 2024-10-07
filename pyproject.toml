@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "AlifTools"
-description = "Helper tools for Alif Type Foundry"
+description = "Helper tools for building Alif Type Foundry fonts"
 license = { file = "LICENSE.txt" }
 readme = "README.md"
 dynamic = ["version"]

@@ -13,6 +13,7 @@ classifiers = ['Environment :: Console', 'Topic :: Text Processing :: Fonts']
 dependencies = []
 
 [project.optional-dependencies]
+test = ["pytest", "black", "isort", "flake8", "ufolib2"]
 shaping = ["pyyaml", "uharfbuzz>=0.40.0"]
 sample = ["blackrenderer", "uharfbuzz"]
 filters = ["ufo2ft"]

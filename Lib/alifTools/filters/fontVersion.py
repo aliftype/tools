@@ -2,7 +2,7 @@ from ufo2ft.filters import BaseFilter
 
 
 class FontVersionFilter(BaseFilter):
-    _kwargs = {"fontVersion": 1, "sidebearing": 160, "dots": 12}
+    _kwargs = {"fontVersion": 1}
 
     def __call__(self, font, glyphSet=None):
         context = self.set_context(font, glyphSet)

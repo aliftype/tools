@@ -152,7 +152,6 @@ class Font:
                     start = end = extra
                     if ":" in extra:
                         start, end = extra.split(":")
-            print(tag, value, start, end)
             if value is None:
                 value = 1
             if start is None or start == "":

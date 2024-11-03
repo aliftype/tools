@@ -21,6 +21,8 @@ HHB_FEATURE_GLOBAL_END = 0xFFFFFFFF
         ("-aalt[2:4]", {"aalt": [[2, 4, False]]}),
         ("aalt[2:]", {"aalt": [[2, HHB_FEATURE_GLOBAL_END, True]]}),
         ("-aalt[2:]", {"aalt": [[2, HHB_FEATURE_GLOBAL_END, False]]}),
+        ("aalt[2]", {"aalt": [[2, 2, True]]}),
+        ("-aalt[2]", {"aalt": [[2, 2, False]]}),
     ],
 )
 def test_parse_feature(text, features):

@@ -1,0 +1,27 @@
+import pytest
+from alifTools.sample import Font
+
+
+HHB_FEATURE_GLOBAL_END = 0xFFFFFFFF
+
+
+@pytest.mark.parametrize(
+    "text,features",
+    [
+        ("aalt", {"aalt": True}),
+        ("+aalt,liga", {"aalt": True, "liga": True}),
+        ("aalt,liga,+dlig", {"aalt": True, "liga": True, "dlig": True}),
+        ("-aalt", {"aalt": False}),
+        ("aalt=0,liga", {"aalt": False, "liga": True}),
+        ("aalt=1,liga=0", {"aalt": True, "liga": False}),
+        ("aalt,-liga,dlig", {"aalt": True, "liga": False, "dlig": True}),
+        ("aalt[2:4]", {"aalt": [[2, 4, True]]}),
+        ("aalt[2:4]=1", {"aalt": [[2, 4, True]]}),
+        ("aalt[2:4]=0", {"aalt": [[2, 4, False]]}),
+        ("-aalt[2:4]", {"aalt": [[2, 4, False]]}),
+        ("aalt[2:]", {"aalt": [[2, HHB_FEATURE_GLOBAL_END, True]]}),
+        ("-aalt[2:]", {"aalt": [[2, HHB_FEATURE_GLOBAL_END, False]]}),
+    ],
+)
+def test_parse_feature(text, features):
+    assert Font._parse_features(text) == features

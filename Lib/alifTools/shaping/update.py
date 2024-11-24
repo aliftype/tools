@@ -85,11 +85,13 @@ def update_shaping_output(
             for text in input["text"]:
                 if face.has_var_data and "variations" not in input:
                     axis_tags = [axis.tag for axis in face.axis_infos]
+                    default_coords = [axis.default_value for axis in face.axis_infos]
                     for instance in face.named_instances:
                         instance_input = input.copy()
-                        instance_input["variations"] = dict(
-                            zip(axis_tags, instance.design_coords)
-                        )
+                        if instance.design_coords != default_coords:
+                            instance_input["variations"] = dict(
+                                zip(axis_tags, instance.design_coords)
+                            )
                         run = shape_run(
                             font,
                             font_path,

@@ -100,6 +100,10 @@ class Font:
         self._location = location
         self.hbFont.set_variations(location)
 
+    @cached_property
+    def sample_text(self):
+        return self.hbFont.face.get_name(hb.OTNameIdPredefined.SAMPLE_TEXT)
+
     def _shape(
         self,
         buf: hb.Buffer,
@@ -362,7 +366,7 @@ def set_dark_colors(
 
 def draw(
     font_path: str,
-    text: str,
+    text: None | str,
     features: str,
     foreground: None | str,
     background: None | str,
@@ -376,6 +380,12 @@ def draw(
     lines: list[GlyphLine] = []
     y = margin
     font = Font(font_path)
+
+    if text is None:
+        text = font.sample_text
+
+    if text is None:
+        raise ValueError("No text provided and no sample text in the font")
 
     locations = font.locations
     for location in reversed(locations):
@@ -470,7 +480,7 @@ def parseColor(color):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Create SVG sample.")
     parser.add_argument("font", help="input font")
-    parser.add_argument("-t", "--text", help="input text", required=True)
+    parser.add_argument("-t", "--text", help="input text")
     parser.add_argument("-f", "--features", help="input features")
     parser.add_argument(
         "-o",

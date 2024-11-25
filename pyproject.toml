@@ -15,7 +15,7 @@ dependencies = []
 [project.optional-dependencies]
 test = ["pytest", "black", "isort", "flake8", "ufolib2"]
 shaping = ["pyyaml", "uharfbuzz>=0.40.0"]
-sample = ["blackrenderer", "uharfbuzz>=0.40.0"]
+sample = ["blackrenderer", "uharfbuzz>=0.43.0"]
 filters = ["ufo2ft"]
 
 [project.urls]

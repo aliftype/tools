@@ -2,7 +2,7 @@ from ufo2ft.filters import BaseFilter
 
 
 class ClearPlaceholdersFilter(BaseFilter):
-    _kwargs = {"outlines": True, "anchors": True, "width": True}
+    _kwargs = {"outlines": False, "anchors": True, "width": True}
 
     def set_context(self, font, glyphSet):
         context = super().set_context(font, glyphSet)

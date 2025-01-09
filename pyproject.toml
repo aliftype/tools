@@ -33,6 +33,9 @@ make-sample = "alifTools.sample:main"
 [tool.setuptools_scm]
 version_file = "Lib/alifTools/_version.py"
 
+[tool.distutils.bdist_wheel]
+universal = true
+
 [tool.black]
 exclude = '''
 (

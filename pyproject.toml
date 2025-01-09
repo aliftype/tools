@@ -31,7 +31,7 @@ update-shaping-tests = "alifTools.shaping.update:main"
 make-sample = "alifTools.sample:main"
 
 [tool.setuptools_scm]
-write_to = "Lib/alifTools/_version.py"
+version_file = "Lib/alifTools/_version.py"
 
 [tool.black]
 exclude = '''

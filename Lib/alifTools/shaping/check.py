@@ -430,7 +430,19 @@ def run_forbidden_glyph_test(
             if not forbidden.endswith(r"\|"):
                 pattern += r"\|"
             if re.findall(pattern, glyph_names):
-                failed_shaping_tests.append((shaping_text, output_buf, forbidden))
+                highlighted = re.sub(
+                    pattern,
+                    lambda m: "<del>" + m.group(0) + "</del>",
+                    glyph_names,
+                )
+                failed_shaping_tests.append(
+                    (
+                        shaping_text,
+                        output_buf,
+                        highlighted,
+                        pattern,
+                    )
+                )
 
 
 def forbidden_glyph_test_results(
@@ -440,10 +452,15 @@ def forbidden_glyph_test_results(
     failed_shaping_tests: list,
 ) -> Generator[tuple[bool | None, Message]]:
     report_items = []
-    for shaping_text, buf, forbidden in failed_shaping_tests:
-        msg = f"{shaping_text} produced '{forbidden}'"
+    for shaping_text, buf, highlighted, pattern in failed_shaping_tests:
+        msg = f"{shaping_text} produced glyphs matching:</br><code>{pattern}</code>"
         report_items.append(
-            create_report_item(font, msg, text=shaping_text, new_buf=buf)
+            create_report_item(
+                font,
+                msg,
+                new_buf=buf,
+                extra_data=highlighted,
+            )
         )
 
     header = f"{shaping_file}: Forbidden glyphs found while shaping"

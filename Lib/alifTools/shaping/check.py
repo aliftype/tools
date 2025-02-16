@@ -218,16 +218,23 @@ def run_a_set_of_shaping_tests(
 
     shaping_basedir = configuration.get("test_directory")
     if not shaping_basedir:
-        yield False, Message(
-            "no-dir", "Shaping test directory not defined in configuration file"
+        yield (
+            False,
+            Message(
+                "no-dir",
+                "Shaping test directory not defined in configuration file",
+            ),
         )
         return
 
     shaping_basedir = Path(shaping_basedir)
     if not shaping_basedir.is_dir():
-        yield False, Message(
-            "not-dir",
-            f"Shaping test directory {shaping_basedir} not found or not a directory.",
+        yield (
+            False,
+            Message(
+                "not-dir",
+                f"Shaping test directory {shaping_basedir} not found or not a directory.",
+            ),
         )
         return
 
@@ -236,8 +243,9 @@ def run_a_set_of_shaping_tests(
         try:
             shaping_input_doc = json.loads(shaping_file.read_text(encoding="utf-8"))
         except Exception as e:
-            yield False, Message(
-                "shaping-invalid-json", f"{shaping_file}: Invalid JSON: {e}."
+            yield (
+                False,
+                Message("shaping-invalid-json", f"{shaping_file}: Invalid JSON: {e}."),
             )
             return
 
@@ -245,9 +253,12 @@ def run_a_set_of_shaping_tests(
         try:
             shaping_tests = shaping_input_doc["tests"]
         except KeyError:
-            yield False, Message(
-                "shaping-missing-tests",
-                f"{shaping_file}: JSON file must have a 'tests' key.",
+            yield (
+                False,
+                Message(
+                    "shaping-missing-tests",
+                    f"{shaping_file}: JSON file must have a 'tests' key.",
+                ),
             )
             return
 
@@ -260,9 +271,12 @@ def run_a_set_of_shaping_tests(
                 continue
 
             if "input" not in test:
-                yield False, Message(
-                    "shaping-missing-input",
-                    f"{shaping_file}: test is missing an input key.",
+                yield (
+                    False,
+                    Message(
+                        "shaping-missing-input",
+                        f"{shaping_file}: test is missing an input key.",
+                    ),
                 )
                 return
 
@@ -456,7 +470,6 @@ def setup_glyph_collides(
     fontpath: Path,
     configuration: Configuration,
 ) -> Dict[str, Any]:
-
     collidoscope_configuration = configuration.get("collidoscope")
     if not collidoscope_configuration:
         return {
@@ -483,7 +496,6 @@ def run_collides_glyph_test(
     failed_shaping_tests: list,
     extra_data: Dict[str, Any],
 ):
-
     parameters = get_shaping_parameters(test, configuration)
     strings = get_input_strings(test, configuration)
     col = extra_data["collidoscope"]
@@ -519,7 +531,7 @@ def collides_glyph_test_results(
         seen_bumps[tuple(bumps)] = True
         report_item = create_report_item(
             font=font,
-            message=f"{',' .join(bumps)} collision found in"
+            message=f"{','.join(bumps)} collision found in"
             f" e.g. <span class='tf'>{shaping_text}</span> <div>{draw}</div>",
             new_buf=buf,
         )
@@ -536,13 +548,16 @@ def run_checks(
 ):
     return {
         "Check that texts shape as per expectation": check_shaping_regression(
-            configuration, fontpath
+            configuration,
+            fontpath,
         ),
         "Check that no forbidden glyphs are found while shaping": check_shaping_forbidden(
-            configuration, fontpath
+            configuration,
+            fontpath,
         ),
         "Check that no collisions are found while shaping": check_shaping_collides(
-            configuration, fontpath
+            configuration,
+            fontpath,
         ),
     }
 

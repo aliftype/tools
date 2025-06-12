@@ -16,7 +16,7 @@ class FontVersionFilter(BaseFilter):
             fontVersion = float(fontVersion)
 
         versionMajor = int(fontVersion)
-        versionMinor = int((fontVersion - versionMajor) * 1000)
+        versionMinor = int(round((fontVersion - versionMajor) * 1000))
 
         font.info.versionMajor = versionMajor
         font.info.versionMinor = versionMinor

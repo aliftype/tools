@@ -1,29 +1,21 @@
 from alifTools.filters import FontVersionFilter
 from ufoLib2 import Font
+import pytest
 
 
-def test_font_version_filter():
+@pytest.mark.parametrize(
+    "fontVersion,major,minor",
+    [
+        (1.002, 1, 2),
+        ("1.002", 1, 2),
+        ("1.002-43aa05", 1, 2),
+        ("v1.002", 1, 2),
+        ("v1.002-43aa05", 1, 2),
+        ("1.9", 1, 900),
+    ],
+)
+def test_font_version_filter(fontVersion, major, minor):
     font = Font()
-    FontVersionFilter(fontVersion=1.002)(font)
-    assert font.info.versionMajor == 1
-    assert font.info.versionMinor == 2
-
-    font = Font()
-    FontVersionFilter(fontVersion="1.002")(font)
-    assert font.info.versionMajor == 1
-    assert font.info.versionMinor == 2
-
-    font = Font()
-    FontVersionFilter(fontVersion="1.002-43aa05")(font)
-    assert font.info.versionMajor == 1
-    assert font.info.versionMinor == 2
-
-    font = Font()
-    FontVersionFilter(fontVersion="v1.002")(font)
-    assert font.info.versionMajor == 1
-    assert font.info.versionMinor == 2
-
-    font = Font()
-    FontVersionFilter(fontVersion="v1.002-43aa05")(font)
-    assert font.info.versionMajor == 1
-    assert font.info.versionMinor == 2
+    FontVersionFilter(fontVersion=fontVersion)(font)
+    assert font.info.versionMajor == major
+    assert font.info.versionMinor == minor

@@ -142,34 +142,34 @@ class Font:
             start = None
             end = None
 
+            feature = feature.strip()
             if feature[0] == "-":
                 value = 0
             if feature[0] in ("+", "-"):
                 feature = feature[1:]
             tag = feature
+            if "[" in tag:
+                assert "]" in tag, f"Invalid feature tag: {tag}"
+                tag, extra = tag.split("[")
+                extra, tag2 = extra.split("]")
+                tag += tag2
+                start = end = extra
+                if ":" in extra:
+                    start, end = extra.split(":")
             if "=" in tag:
                 tag, value = tag.split("=")
-            if "[" in tag:
-                tag, extra = tag.split("[")
-                if extra[-1] == "]":
-                    extra = extra[:-1]
-                    start = end = extra
-                    if ":" in extra:
-                        start, end = extra.split(":")
             if value is None:
                 value = 1
             if start is None or start == "":
                 start = 0
             if end is None or end == "":
                 end = 0xFFFFFFFF
-            features.setdefault(tag, []).append(
-                [int(start), int(end), bool(int(value))]
-            )
+            features.setdefault(tag, []).append([int(start), int(end), int(value)])
         for tag, value in features.items():
-            if value == [[0, 0xFFFFFFFF, 1]]:
-                features[tag] = True
-            if value == [[0, 0xFFFFFFFF, 0]]:
-                features[tag] = False
+            if len(value) != 1:
+                continue
+            if value[0][:2] == [0, 0xFFFFFFFF]:
+                features[tag] = value[0][2]
         return features
 
     def shape(

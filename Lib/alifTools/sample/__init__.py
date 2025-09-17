@@ -365,7 +365,7 @@ def set_dark_colors(
 
 
 def draw(
-    font_path: str,
+    font_paths: list[pathlib.Path],
     text: None | str,
     features: str,
     foreground: None | str,
@@ -379,19 +379,22 @@ def draw(
     bounds = None
     lines: list[GlyphLine] = []
     y = margin
-    font = Font(font_path)
+    fonts = [Font(font_path) for font_path in font_paths]
 
-    if text is None:
-        text = font.sample_text
+    fonts_locations = []
+    if len(fonts) == 1:
+        fonts_locations = [(fonts[0], location) for location in fonts[0].locations]
+    else:
+        fonts_locations = [(font, {}) for font in fonts]
 
-    if text is None:
-        raise ValueError("No text provided and no sample text in the font")
-
-    locations = font.locations
-    for location in reversed(locations):
+    for font, location in reversed(fonts_locations):
         font.set_location(location)
 
-        text_lines = list(reversed(text.split("\n")))
+        sample_text = text or font.sample_text
+        if not sample_text:
+            raise ValueError("No text provided and no sample text in the font")
+
+        text_lines = list(reversed(sample_text.split("\n")))
         if justify:
             max_width = 0
             for text_line in text_lines:
@@ -479,7 +482,7 @@ def parseColor(color):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Create SVG sample.")
-    parser.add_argument("font", help="input font")
+    parser.add_argument("fonts", help="input font", nargs="+", type=pathlib.Path)
     parser.add_argument("-t", "--text", help="input text")
     parser.add_argument("-f", "--features", help="input features")
     parser.add_argument(
@@ -498,7 +501,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     draw(
-        args.font,
+        args.fonts,
         args.text,
         args.features,
         args.foreground,

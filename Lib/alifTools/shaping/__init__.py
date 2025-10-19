@@ -144,18 +144,12 @@ def serialize_buffer(
     buffer: hb.Buffer | FakeBuffer,  # type: ignore
     glyphs_only: bool = False,
 ) -> str:
-    outs = []
-    for info, pos in zip(buffer.glyph_infos, buffer.glyph_positions):  # type: ignore
-        if (glyph_name := getattr(info, "name", None)) is None:
-            glyph_name = font.glyph_to_string(info.codepoint)
-        if glyphs_only:
-            outs.append(glyph_name)
-            continue
-        outs.append("%s=%i" % (glyph_name, info.cluster))
-        if pos.position[0] != 0 or pos.position[1] != 0:
-            outs[-1] = outs[-1] + "@%i,%i" % (pos.position[0], pos.position[1])
-        outs[-1] = outs[-1] + "+%i" % (pos.position[2])
-    return "|".join(outs)
+    flags = hb.BufferSerializeFlags.DEFAULT
+    if glyphs_only:
+        flags |= (
+            hb.BufferSerializeFlags.NO_CLUSTERS | hb.BufferSerializeFlags.NO_POSITIONS
+        )
+    return buffer.serialize(font, flags=flags)[1:-1]
 
 
 def _move_to(x, y, buffer_list):

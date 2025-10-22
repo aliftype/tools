@@ -123,8 +123,10 @@ def create_report_item(
     message: str,
     text: str | None = None,
     parameters: ShapingParameters = {},
-    new_buf: hb.Buffer | FakeBuffer | None = None,  # type: ignore
-    old_buf: hb.Buffer | None = None,  # type: ignore
+    new_buf: hb.Buffer | None = None,  # type: ignore
+    old_buf: hb.Buffer | FakeBuffer | str | None = None,  # type: ignore
+    serialized_new_buf: str | None = None,
+    serialized_old_buf: str | None = None,
     note: str | None = None,
     extra_data: Dict | None = None,
 ) -> str:
@@ -136,23 +138,6 @@ def create_report_item(
     message += "</h4>\n"
     if extra_data:
         message += f"<pre>{extra_data}</pre>\n"
-
-    serialized_new_buf = None
-    serialized_old_buf = None
-    if old_buf:
-        if isinstance(old_buf, FakeBuffer):
-            try:
-                serialized_old_buf = serialize_buffer(font, old_buf)
-            except Exception:
-                # This may fail if the glyphs are not found in the font
-                serialized_old_buf = None
-                old_buf = None  # Don't try to draw it either
-        else:
-            serialized_old_buf = old_buf
-
-    if new_buf:
-        glyphs_only = bool(old_buf and isinstance(old_buf, str))
-        serialized_new_buf = serialize_buffer(font, new_buf, glyphs_only=glyphs_only)
 
     # Report a diff table
     if serialized_old_buf and serialized_new_buf:
@@ -368,7 +353,7 @@ def generate_shaping_regression_report(
             if k in test
         }
         parameters = get_shaping_parameters(test, configuration)
-        # Make HTML report here.
+
         if "=" in expected:
             buf2 = _buffer_from_string(font, expected)
         else:
@@ -381,6 +366,8 @@ def generate_shaping_regression_report(
             parameters=parameters,
             new_buf=output_buf,
             old_buf=buf2,
+            serialized_new_buf=output_serialized,
+            serialized_old_buf=expected,
             note=test.get("note"),
             extra_data=extra_data,
         )

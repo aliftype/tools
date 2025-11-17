@@ -18,7 +18,7 @@ from functools import cached_property
 from typing import NamedTuple, Tuple, TypeAlias
 
 import uharfbuzz as hb
-from blackrenderer.backends.svg import SVGSurface
+from blackrenderer.backends.svg import SVGSurface, SVGCanvas
 from fontTools.misc import etree as ET
 
 
@@ -70,6 +70,13 @@ class GlyphRun(NamedTuple):
     location: Location
     glyphs: list[GlyphInfo]
 
+    def draw(
+        self,
+        canvas: SVGCanvas,
+        foreground,
+    ):
+        self.font.draw_glyph_run(self, canvas, foreground=foreground)
+
 
 class GlyphLine(NamedTuple):
     glyphs: list[GlyphRun]
@@ -114,6 +121,18 @@ class GlyphLine(NamedTuple):
         height = -rect.yMin + rect.yMax
 
         return cls(glyphs, rect, x, y, width, height)
+
+    def draw(
+        self,
+        canvas: SVGCanvas,
+        foreground,
+        x_offset: float = 0,
+        y_offset: float = 0,
+    ):
+        with canvas.savedState():
+            canvas.translate(self.x + x_offset, self.y + y_offset)
+            for run in self.glyphs:
+                run.draw(canvas=canvas, foreground=foreground)
 
 
 class Font:
@@ -295,11 +314,12 @@ class Font:
 
     def calc_glyph_bounds(
         self,
-        glyphs: GlyphRun,
+        run: GlyphRun,
     ) -> Rect:
+        self.set_location(run.location)
         bounds: Rect | None = None
         x, y = 0, 0
-        for glyph in glyphs.glyphs:
+        for glyph in run.glyphs:
             glyph_bounds = self._glyph_bounds(glyph).offset(
                 x + glyph.x_offset,
                 y + glyph.y_offset,
@@ -312,7 +332,7 @@ class Font:
     def draw_glyph(
         self,
         glyph: GlyphInfo,
-        canvas,
+        canvas: SVGCanvas,
         foreground=None,
     ):
         brFont = self.brFont
@@ -321,6 +341,20 @@ class Font:
             brFont.drawGlyph(glyph_name, canvas, textColor=parseColor(foreground))
         else:
             brFont.drawGlyph(glyph_name, canvas)
+
+    def draw_glyph_run(
+        self,
+        run: GlyphRun,
+        canvas: SVGCanvas,
+        foreground,
+    ):
+        self.set_location(run.location)
+        with canvas.savedState():
+            for glyph in run.glyphs:
+                with canvas.savedState():
+                    canvas.translate(glyph.x_offset, glyph.y_offset)
+                    self.draw_glyph(glyph, canvas, foreground)
+                canvas.translate(glyph.x_advance, glyph.y_advance)
 
 
 # Ported from HarfBuzz:
@@ -457,19 +491,9 @@ def draw_lines(
         if background:
             canvas.drawRectSolid(surface._viewBox, parseColor(background))
         for line in lines:
-            with canvas.savedState():
-                # Center align the line.
-                x = (bounds[2] - line.rect[2]) / 2 - margin
-                canvas.translate(x, line.y)
-                for run in line.glyphs:
-                    font = run.font
-                    font.set_location(run.location)
-                    with canvas.savedState():
-                        for glyph in run.glyphs:
-                            with canvas.savedState():
-                                canvas.translate(glyph.x_offset, glyph.y_offset)
-                                font.draw_glyph(glyph, canvas, foreground)
-                            canvas.translate(glyph.x_advance, glyph.y_advance)
+            # Center align the line.
+            x_offset = (bounds[2] - line.rect[2]) / 2 - margin
+            line.draw(canvas=canvas, foreground=foreground, x_offset=x_offset)
 
     if dark_foreground or dark_background:
         return _set_dark_colors(
@@ -507,8 +531,6 @@ def draw(
         fonts_locations = [(font, {}) for font in fonts]
 
     for font, location in reversed(fonts_locations):
-        font.set_location(location)
-
         sample_text = text or font.sample_text
         if not sample_text:
             raise ValueError("No text provided and no sample text in the font")

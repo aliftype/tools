@@ -14,12 +14,16 @@
 
 import argparse
 import pathlib
-import io
 from functools import cached_property
-from typing import NamedTuple
+from typing import NamedTuple, Tuple, TypeAlias
 
 import uharfbuzz as hb
 from blackrenderer.backends.svg import SVGSurface
+from fontTools.misc import etree as ET
+
+
+Location: TypeAlias = dict[str, int]
+Features: TypeAlias = dict[str, list[list[int]]]
 
 
 class Rect(NamedTuple):
@@ -28,12 +32,12 @@ class Rect(NamedTuple):
     xMax: float
     yMax: float
 
-    def offset(self, x, y):
+    def offset(self, x, y) -> "Rect":
         from fontTools.misc.arrayTools import offsetRect
 
         return Rect(*offsetRect(self, x, y))
 
-    def inset(self, x, y):
+    def inset(self, x, y) -> "Rect":
         from fontTools.misc.arrayTools import insetRect
 
         return Rect(*insetRect(self, x, y))
@@ -46,6 +50,13 @@ class Rect(NamedTuple):
         return Rect(*unionRect(self, other))
 
 
+class TextRun(NamedTuple):
+    font: "Font"
+    features: str
+    location: str
+    string: str
+
+
 class GlyphInfo(NamedTuple):
     glyph: int
     x_advance: float
@@ -54,9 +65,59 @@ class GlyphInfo(NamedTuple):
     y_offset: float
 
 
+class GlyphRun(NamedTuple):
+    font: "Font"
+    location: Location
+    glyphs: list[GlyphInfo]
+
+
+class GlyphLine(NamedTuple):
+    glyphs: list[GlyphRun]
+    rect: Rect
+    x: float
+    y: float
+    width: float
+    height: float
+
+    @classmethod
+    def build(
+        cls,
+        text: list[TextRun],
+        x: float,
+        y: float,
+        target_width: float | None = None,
+    ) -> "GlyphLine":
+        glyphs: list[GlyphRun] = []
+        width: float = 0
+        rect: Rect | None = None
+
+        if target_width is not None:
+            if len(text) > 1:
+                raise NotImplementedError("Can’t justify multi-run text")
+            run = text[0]
+            glyphs_, width = run.font.shape_justify(
+                run.string,
+                run.location,
+                run.features,
+                target_width,
+            )
+            glyphs.append(glyphs_)
+            rect = run.font.calc_glyph_bounds(glyphs_)
+        else:
+            for run in text:
+                glyphs_, width_ = run.font.shape(run.string, run.location, run.features)
+                width += width_
+                glyphs.append(glyphs_)
+                rect = run.font.calc_glyph_bounds(glyphs_).union(rect)
+
+        rect = rect.offset(0, y)
+        height = -rect.yMin + rect.yMax
+
+        return cls(glyphs, rect, x, y, width, height)
+
+
 class Font:
     def __init__(self, path: str):
-
         self.path = path
         blob = hb.Blob.from_file_path(path)
         face = hb.Face(blob)
@@ -95,7 +156,7 @@ class Font:
 
     def set_location(
         self,
-        location: dict[str, int],
+        location: Location,
     ):
         self._location = location
         self.hbFont.set_variations(location)
@@ -108,8 +169,8 @@ class Font:
         self,
         buf: hb.Buffer,
         text: str,
-        location: dict[str, int],
-        features: dict[str, list[list[int]]],
+        location: Location,
+        features: Features,
     ) -> float:
         self.set_location(location)
         buf.reset()
@@ -118,7 +179,11 @@ class Font:
         hb.shape(self.hbFont, buf, features=features)
         return sum(g.x_advance for g in buf.glyph_positions)
 
-    def _make_glyphs(self, buf: hb.Buffer) -> list[GlyphInfo]:
+    def _make_glyphs(
+        self,
+        buf: hb.Buffer,
+        location: Location,
+    ) -> GlyphRun:
         glyphs = []
         for info, pos in zip(buf.glyph_infos, buf.glyph_positions):
             glyphs.append(
@@ -130,10 +195,10 @@ class Font:
                     y_offset=pos.y_offset,
                 )
             )
-        return glyphs
+        return GlyphRun(font=self, location=location, glyphs=glyphs)
 
     @staticmethod
-    def _parse_features(text: str) -> dict[str, list[list[int]]]:
+    def _parse_features(text: str) -> Features:
         if not text:
             return {}
         features = {}
@@ -175,31 +240,31 @@ class Font:
     def shape(
         self,
         text: str,
-        location: dict[str, int],
+        location: Location,
         features: str,
-    ) -> list[GlyphInfo]:
+    ) -> Tuple[GlyphRun, float]:
         buf = hb.Buffer()
         features = self._parse_features(features)
         width = self._shape(buf, text, location, features)
-        glyphs = self._make_glyphs(buf)
+        glyphs = self._make_glyphs(buf, location)
         return glyphs, width
 
     def shape_justify(
         self,
         text: str,
-        location: dict[str, int],
+        location: Location,
         features: str,
         target_width: float,
-    ):
+    ) -> Tuple[GlyphRun, float]:
         buf = hb.Buffer()
         features = self._parse_features(features)
 
         width = self._shape(buf, text, location, features)
         if width >= target_width:
-            return self._make_glyphs(buf), width, location
+            return self._make_glyphs(buf, location), width
 
         if (axis := next((a for a in self.axes if a.tag == "MSHQ"), None)) is None:
-            return self._make_glyphs(buf), width, location
+            return self._make_glyphs(buf, location), width
 
         location = {axis.tag: axis.max_value}
         max_width = self._shape(buf, text, location, features)
@@ -215,7 +280,7 @@ class Font:
             max_width,
         )
 
-        return self._make_glyphs(buf), width, location
+        return self._make_glyphs(buf, location), width
 
     def _glyph_bounds(
         self,
@@ -230,11 +295,11 @@ class Font:
 
     def calc_glyph_bounds(
         self,
-        glyphs: list[GlyphInfo],
+        glyphs: GlyphRun,
     ) -> Rect:
-        bounds = None
+        bounds: Rect | None = None
         x, y = 0, 0
-        for glyph in glyphs:
+        for glyph in glyphs.glyphs:
             glyph_bounds = self._glyph_bounds(glyph).offset(
                 x + glyph.x_offset,
                 y + glyph.y_offset,
@@ -256,41 +321,6 @@ class Font:
             brFont.drawGlyph(glyph_name, canvas, textColor=parseColor(foreground))
         else:
             brFont.drawGlyph(glyph_name, canvas)
-
-
-class GlyphLine(NamedTuple):
-    font: Font
-    glyphs: list[GlyphInfo]
-    rect: Rect
-    x: float
-    y: float
-    width: float
-    height: float
-    location: dict[str, int] | None = None
-
-    @classmethod
-    def build(
-        cls,
-        font: Font,
-        text: str,
-        features: str,
-        x: float,
-        y: float,
-        location: dict[str, int],
-        target_width: float | None = None,
-    ) -> "GlyphLine":
-
-        if target_width is not None:
-            glyphs, width, location = font.shape_justify(
-                text, location, features, target_width
-            )
-        else:
-            glyphs, width = font.shape(text, location, features)
-
-        rect = font.calc_glyph_bounds(glyphs).offset(0, y)
-        height = -rect.yMin + rect.yMax
-
-        return cls(font, glyphs, rect, x, y, width, height, location)
 
 
 # Ported from HarfBuzz:
@@ -334,17 +364,26 @@ def solve_itp(f, a, b, epsilon, min_y, max_y, ya, yb):
     return 0.5 * (a + b), y_itp
 
 
-def set_dark_colors(
+def _surface_to_tree(
+    surface: SVGSurface,
+) -> ET.ElementTree:
+    import io
+    from blackrenderer.backends.svg import SVGSurface, writeSVGElements
+
+    svg_file = io.BytesIO()
+    writeSVGElements(surface._svgElements, surface._viewBox, svg_file)
+    svg_file.seek(0)
+
+    return ET.parse(svg_file)
+
+
+def _set_dark_colors(
     surface: SVGSurface,
     foreground: None | str,
     background: None | str,
     dark_foreground: None | str,
     dark_background: None | str,
-    output: pathlib.Path,
 ):
-    from blackrenderer.backends.svg import writeSVGElements
-    from fontTools.misc import etree as ET
-
     css = ["@media (prefers-color-scheme: dark) {"]
     if dark_foreground:
         css += [f'path[fill="#{foreground}"] {{', f" fill: #{dark_foreground};", " }"]
@@ -352,16 +391,96 @@ def set_dark_colors(
         css += [f'path[fill="#{background}"] {{', f" fill: #{dark_background};", " }"]
     css += ["}"]
 
-    svg_file = io.BytesIO()
-    writeSVGElements(surface._svgElements, surface._viewBox, svg_file)
-    svg_file.seek(0)
-
-    tree: ET.ElementTree = ET.parse(svg_file)
+    tree = _surface_to_tree(surface)
     root = tree.getroot()
     style = ET.SubElement(root, "style")
     style.text = "\n" + "\n".join(css) + "\n"
 
-    tree.write(output, pretty_print=True, xml_declaration=True)
+    return tree
+
+
+def make_lines(
+    text_lines: list[list[TextRun]],
+    justify: bool,
+    x: float,
+    y: float,
+    margin: float,
+) -> list[GlyphLine]:
+    lines: list[GlyphLine] = []
+    if justify:
+        max_width = 0
+        for text_line in text_lines:
+            line = GlyphLine.build(
+                text_line,
+                x,
+                y,
+            )
+            max_width = max(max_width, line.width)
+
+        for text_line in text_lines:
+            line = GlyphLine.build(
+                text_line,
+                x,
+                y,
+                max_width,
+            )
+            lines.append(line)
+            y += line.height + margin
+    else:
+        for text_line in text_lines:
+            line = GlyphLine.build(
+                text_line,
+                x,
+                y,
+            )
+            lines.append(line)
+            y += line.height + margin
+
+    return lines, y
+
+
+def draw_lines(
+    lines: list[GlyphLine],
+    foreground: None | str,
+    background: None | str,
+    dark_foreground: None | str,
+    dark_background: None | str,
+    margin: float,
+) -> ET.ElementTree:
+    bounds: Rect | None = None
+    for line in lines:
+        bounds = line.rect.union(bounds)
+    bounds = bounds.inset(-margin, -margin)
+
+    surface = SVGSurface()
+    with surface.canvas(bounds) as canvas:
+        if background:
+            canvas.drawRectSolid(surface._viewBox, parseColor(background))
+        for line in lines:
+            with canvas.savedState():
+                # Center align the line.
+                x = (bounds[2] - line.rect[2]) / 2 - margin
+                canvas.translate(x, line.y)
+                for run in line.glyphs:
+                    font = run.font
+                    font.set_location(run.location)
+                    with canvas.savedState():
+                        for glyph in run.glyphs:
+                            with canvas.savedState():
+                                canvas.translate(glyph.x_offset, glyph.y_offset)
+                                font.draw_glyph(glyph, canvas, foreground)
+                            canvas.translate(glyph.x_advance, glyph.y_advance)
+
+    if dark_foreground or dark_background:
+        return _set_dark_colors(
+            surface,
+            foreground,
+            background,
+            dark_foreground,
+            dark_background,
+        )
+
+    return _surface_to_tree(surface)
 
 
 def draw(
@@ -376,9 +495,9 @@ def draw(
     output_path: pathlib.Path,
 ):
     margin = 100
-    bounds = None
     lines: list[GlyphLine] = []
     y = margin
+    x = 0
     fonts = [Font(font_path) for font_path in font_paths]
 
     fonts_locations = []
@@ -394,83 +513,43 @@ def draw(
         if not sample_text:
             raise ValueError("No text provided and no sample text in the font")
 
-        text_lines = list(reversed(sample_text.split("\n")))
-        if justify:
-            max_width = 0
-            for text_line in text_lines:
-                line = GlyphLine.build(
-                    font,
-                    text_line,
-                    features,
-                    margin,
-                    y,
-                    location,
+        text_lines = [
+            [
+                TextRun(
+                    font=font,
+                    features=features,
+                    location=location,
+                    string=line,
                 )
-                max_width = max(max_width, line.width)
+            ]
+            for line in reversed(sample_text.split("\n"))
+        ]
 
-            font.set_location(location)
-            for text_line in text_lines:
-                line = GlyphLine.build(
-                    font,
-                    text_line,
-                    features,
-                    margin,
-                    y,
-                    location,
-                    max_width,
-                )
-                lines.append(line)
-                bounds = line.rect.union(bounds)
-                y += line.height + margin
-        else:
-            for text_line in text_lines:
-                line = GlyphLine.build(
-                    font,
-                    text_line,
-                    features,
-                    margin,
-                    y,
-                    location,
-                )
-                lines.append(line)
-                bounds = line.rect.union(bounds)
-                y += line.height + margin
+        lines_, y = make_lines(
+            text_lines=text_lines,
+            justify=justify,
+            x=x,
+            y=y,
+            margin=margin,
+        )
+
+        lines.extend(lines_)
 
     if dark_foreground and not foreground:
         foreground = "000000"
     if dark_background and not background:
         background = "FFFFFF"
 
-    surface = SVGSurface()
+    tree = draw_lines(
+        lines=lines,
+        foreground=foreground,
+        background=background,
+        dark_foreground=dark_foreground,
+        dark_background=dark_background,
+        margin=margin,
+    )
 
-    bounds = bounds.inset(-margin, -margin)
-    with surface.canvas(bounds) as canvas:
-        if background:
-            canvas.drawRectSolid(surface._viewBox, parseColor(background))
-        for line in lines:
-            font = line.font
-            font.set_location(line.location)
-            with canvas.savedState():
-                # Center align the line.
-                x = (bounds[2] - line.rect[2]) / 2 - margin
-                canvas.translate(x, line.y)
-                for glyph in line.glyphs:
-                    with canvas.savedState():
-                        canvas.translate(glyph.x_offset, glyph.y_offset)
-                        font.draw_glyph(glyph, canvas, foreground)
-                    canvas.translate(glyph.x_advance, glyph.y_advance)
-
-    if dark_foreground or dark_background:
-        set_dark_colors(
-            surface,
-            foreground,
-            background,
-            dark_foreground,
-            dark_background,
-            output_path,
-        )
-        return
-    surface.saveImage(output_path)
+    tree.write(output_path, pretty_print=True, xml_declaration=True)
 
 
 def parseColor(color):

@@ -1,5 +1,5 @@
 import pytest
-from alifTools.sample import Font
+from alifTools.sample import parseFeatures
 
 
 HHB_FEATURE_GLOBAL_END = 0xFFFFFFFF
@@ -29,4 +29,4 @@ HHB_FEATURE_GLOBAL_END = 0xFFFFFFFF
     ],
 )
 def test_parse_feature(text, features):
-    assert Font._parse_features(text) == features
+    assert parseFeatures(text) == features

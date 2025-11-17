@@ -52,7 +52,7 @@ class Rect(NamedTuple):
 
 class TextRun(NamedTuple):
     font: "Font"
-    features: str
+    features: Features
     location: str
     string: str
 
@@ -216,54 +216,13 @@ class Font:
             )
         return GlyphRun(font=self, location=location, glyphs=glyphs)
 
-    @staticmethod
-    def _parse_features(text: str) -> Features:
-        if not text:
-            return {}
-        features = {}
-        for feature in text.split(","):
-            value = None
-            start = None
-            end = None
-
-            feature = feature.strip()
-            if feature[0] == "-":
-                value = 0
-            if feature[0] in ("+", "-"):
-                feature = feature[1:]
-            tag = feature
-            if "[" in tag:
-                assert "]" in tag, f"Invalid feature tag: {tag}"
-                tag, extra = tag.split("[")
-                extra, tag2 = extra.split("]")
-                tag += tag2
-                start = end = extra
-                if ":" in extra:
-                    start, end = extra.split(":")
-            if "=" in tag:
-                tag, value = tag.split("=")
-            if value is None:
-                value = 1
-            if start is None or start == "":
-                start = 0
-            if end is None or end == "":
-                end = 0xFFFFFFFF
-            features.setdefault(tag, []).append([int(start), int(end), int(value)])
-        for tag, value in features.items():
-            if len(value) != 1:
-                continue
-            if value[0][:2] == [0, 0xFFFFFFFF]:
-                features[tag] = value[0][2]
-        return features
-
     def shape(
         self,
         text: str,
         location: Location,
-        features: str,
+        features: Features,
     ) -> Tuple[GlyphRun, float]:
         buf = hb.Buffer()
-        features = self._parse_features(features)
         width = self._shape(buf, text, location, features)
         glyphs = self._make_glyphs(buf, location)
         return glyphs, width
@@ -272,11 +231,10 @@ class Font:
         self,
         text: str,
         location: Location,
-        features: str,
+        features: Features,
         target_width: float,
     ) -> Tuple[GlyphRun, float]:
         buf = hb.Buffer()
-        features = self._parse_features(features)
 
         width = self._shape(buf, text, location, features)
         if width >= target_width:
@@ -524,6 +482,8 @@ def draw(
     x = 0
     fonts = [Font(font_path) for font_path in font_paths]
 
+    features: Features = parseFeatures(features)
+
     fonts_locations = []
     if len(fonts) == 1:
         fonts_locations = [(fonts[0], location) for location in fonts[0].locations]
@@ -579,6 +539,46 @@ def parseColor(color):
         return tuple(int(color[i : i + 2], 16) / 255 for i in (2, 4, 6))
     assert len(color) == 6, color
     return tuple(int(color[i : i + 2], 16) / 255 for i in (0, 2, 4)) + (1,)
+
+
+def parseFeatures(text: str) -> Features:
+    if not text:
+        return {}
+    features = {}
+    for feature in text.split(","):
+        value = None
+        start = None
+        end = None
+
+        feature = feature.strip()
+        if feature[0] == "-":
+            value = 0
+        if feature[0] in ("+", "-"):
+            feature = feature[1:]
+        tag = feature
+        if "[" in tag:
+            assert "]" in tag, f"Invalid feature tag: {tag}"
+            tag, extra = tag.split("[")
+            extra, tag2 = extra.split("]")
+            tag += tag2
+            start = end = extra
+            if ":" in extra:
+                start, end = extra.split(":")
+        if "=" in tag:
+            tag, value = tag.split("=")
+        if value is None:
+            value = 1
+        if start is None or start == "":
+            start = 0
+        if end is None or end == "":
+            end = 0xFFFFFFFF
+        features.setdefault(tag, []).append([int(start), int(end), int(value)])
+    for tag, value in features.items():
+        if len(value) != 1:
+            continue
+        if value[0][:2] == [0, 0xFFFFFFFF]:
+            features[tag] = value[0][2]
+    return features
 
 
 def main(argv=None):

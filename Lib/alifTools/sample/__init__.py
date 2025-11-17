@@ -53,7 +53,7 @@ class Rect(NamedTuple):
 class TextRun(NamedTuple):
     font: "Font"
     features: Features
-    location: str
+    location: Location
     string: str
 
 

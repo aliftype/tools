@@ -69,6 +69,7 @@ class GlyphRun(NamedTuple):
     font: "Font"
     location: Location
     glyphs: list[GlyphInfo]
+    width: float
 
     def draw(
         self,
@@ -102,7 +103,7 @@ class GlyphLine(NamedTuple):
             if len(text) > 1:
                 raise NotImplementedError("Can’t justify multi-run text")
             run = text[0]
-            glyphs_, width = run.font.shape_justify(
+            glyphs_ = run.font.shape_justify(
                 run.string,
                 run.location,
                 run.features,
@@ -110,12 +111,13 @@ class GlyphLine(NamedTuple):
             )
             glyphs.append(glyphs_)
             rect = run.font.calc_glyph_bounds(glyphs_)
+            width += glyphs_.width
         else:
             for run in text:
-                glyphs_, width_ = run.font.shape(run.string, run.location, run.features)
-                width += width_
+                glyphs_ = run.font.shape(run.string, run.location, run.features)
                 glyphs.append(glyphs_)
-                rect = run.font.calc_glyph_bounds(glyphs_).union(rect)
+                rect = run.font.calc_glyph_bounds(glyphs_).offset(width, 0).union(rect)
+                width += glyphs_.width
 
         rect = rect.offset(0, y)
         height = -rect.yMin + rect.yMax
@@ -133,6 +135,7 @@ class GlyphLine(NamedTuple):
             canvas.translate(self.x + x_offset, self.y + y_offset)
             for run in self.glyphs:
                 run.draw(canvas=canvas, foreground=foreground)
+                canvas.translate(run.width, 0)
 
 
 class Font:
@@ -205,6 +208,7 @@ class Font:
         self,
         buf: hb.Buffer,
         location: Location,
+        width: float,
     ) -> GlyphRun:
         glyphs = []
         for info, pos in zip(buf.glyph_infos, buf.glyph_positions):
@@ -217,18 +221,17 @@ class Font:
                     y_offset=pos.y_offset,
                 )
             )
-        return GlyphRun(font=self, location=location, glyphs=glyphs)
+        return GlyphRun(font=self, location=location, glyphs=glyphs, width=width)
 
     def shape(
         self,
         text: str,
         location: Location,
         features: Features,
-    ) -> Tuple[GlyphRun, float]:
+    ) -> GlyphRun:
         buf = hb.Buffer()
         width = self._shape(buf, text, location, features)
-        glyphs = self._make_glyphs(buf, location)
-        return glyphs, width
+        return self._make_glyphs(buf, location, width)
 
     def shape_justify(
         self,
@@ -236,15 +239,15 @@ class Font:
         location: Location,
         features: Features,
         target_width: float,
-    ) -> Tuple[GlyphRun, float]:
+    ) -> GlyphRun:
         buf = hb.Buffer()
 
         width = self._shape(buf, text, location, features)
         if width >= target_width:
-            return self._make_glyphs(buf, location), width
+            return self._make_glyphs(buf, location, width)
 
         if (axis := next((a for a in self.axes if a.tag == "MSHQ"), None)) is None:
-            return self._make_glyphs(buf, location), width
+            return self._make_glyphs(buf, location, width)
 
         location = {axis.tag: axis.max_value}
         max_width = self._shape(buf, text, location, features)
@@ -260,7 +263,7 @@ class Font:
             max_width,
         )
 
-        return self._make_glyphs(buf, location), width
+        return self._make_glyphs(buf, location, width)
 
     def _glyph_bounds(
         self,

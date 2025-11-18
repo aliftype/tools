@@ -120,7 +120,7 @@ class GlyphLine(NamedTuple):
                 width += glyphs_.width
 
         rect = rect.offset(0, y)
-        height = -rect.yMin + rect.yMax
+        height: float = max(r.font.height for r in glyphs)
 
         return cls(glyphs, rect, x, y, width, height)
 
@@ -189,6 +189,22 @@ class Font:
     @cached_property
     def sample_text(self):
         return self.hbFont.face.get_name(hb.OTNameIdPredefined.SAMPLE_TEXT)
+
+    @cached_property
+    def height(self) -> float:
+        return self.ascender - self.descender
+
+    @cached_property
+    def ascender(self) -> float:
+        return self.hbFont.get_font_extents("ltr").ascender
+
+    @cached_property
+    def descender(self) -> float:
+        return self.hbFont.get_font_extents("ltr").descender
+
+    @cached_property
+    def line_gap(self) -> float:
+        return self.hbFont.get_font_extents("ltr").line_gap
 
     def _shape(
         self,
@@ -402,7 +418,6 @@ def make_lines(
     justify: bool,
     x: float,
     y: float,
-    margin: float,
 ) -> list[GlyphLine]:
     lines: list[GlyphLine] = []
     if justify:
@@ -423,7 +438,7 @@ def make_lines(
                 max_width,
             )
             lines.append(line)
-            y += line.height + margin
+            y += line.height
     else:
         for text_line in text_lines:
             line = GlyphLine.build(
@@ -432,7 +447,7 @@ def make_lines(
                 y,
             )
             lines.append(line)
-            y += line.height + margin
+            y += line.height
 
     return lines, y
 
@@ -482,9 +497,8 @@ def draw(
     justify: bool,
     output_path: pathlib.Path,
 ):
-    margin = 100
     lines: list[GlyphLine] = []
-    y = margin
+    y = 0
     x = 0
     fonts = [Font(font_path) for font_path in font_paths]
 
@@ -513,13 +527,7 @@ def draw(
             for line in reversed(sample_text.split("\n"))
         ]
 
-        lines_, y = make_lines(
-            text_lines=text_lines,
-            justify=justify,
-            x=x,
-            y=y,
-            margin=margin,
-        )
+        lines_, y = make_lines(text_lines=text_lines, justify=justify, x=x, y=y)
 
         lines.extend(lines_)
 
@@ -534,7 +542,7 @@ def draw(
         background=background,
         dark_foreground=dark_foreground,
         dark_background=dark_background,
-        margin=margin,
+        margin=100,
     )
 
     tree.write(output_path, pretty_print=True, xml_declaration=True)

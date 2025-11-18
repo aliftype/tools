@@ -177,6 +177,9 @@ class Font:
         self,
         location: Location,
     ):
+        for axis in self.axes:
+            if axis.tag not in location:
+                location[axis.tag] = axis.default_value
         self._location = location
         self.hbFont.set_variations(location)
 

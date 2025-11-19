@@ -152,6 +152,14 @@ class Font:
         hbFont = hb.Font(self.hbFont)
         return self.__class__(self.path, hbFont)
 
+    @property
+    def size(self) -> int:
+        return self.hbFont.scale[0]
+
+    @size.setter
+    def size(self, size: int):
+        self.hbFont.scale = (size, size)
+
     @cached_property
     def brFont(self):
         from blackrenderer.font import BlackRendererFont

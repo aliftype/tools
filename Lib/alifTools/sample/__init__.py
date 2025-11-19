@@ -230,6 +230,9 @@ class Font:
         self.set_location(location)
         buf.reset()
         buf.add_str(text)
+        # FIXME: do real bidi
+        if text[0] == "۝" and text[1:].isnumeric():
+            buf.direction = "ltr"
         buf.guess_segment_properties()
         hb.shape(self.hbFont, buf, features=features)
         return sum(g.x_advance for g in buf.glyph_positions)

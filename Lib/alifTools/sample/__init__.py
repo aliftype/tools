@@ -139,12 +139,18 @@ class GlyphLine(NamedTuple):
 
 
 class Font:
-    def __init__(self, path: str):
+    def __init__(self, path: str, hbFont: hb.Font | None = None):
         self.path = path
-        blob = hb.Blob.from_file_path(path)
-        face = hb.Face(blob)
-        self.hbFont = hb.Font(face)
+        if hbFont is None:
+            blob = hb.Blob.from_file_path(path)
+            face = hb.Face(blob)
+            hbFont = hb.Font(face)
+        self.hbFont = hbFont
         self._location = None
+
+    def subfont(self) -> "Font":
+        hbFont = hb.Font(self.hbFont)
+        return self.__class__(self.path, hbFont)
 
     @cached_property
     def brFont(self):

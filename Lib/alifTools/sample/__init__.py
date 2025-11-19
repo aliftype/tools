@@ -15,7 +15,7 @@
 import argparse
 import pathlib
 from functools import cached_property
-from typing import NamedTuple, Tuple, TypeAlias
+from typing import NamedTuple, TypeAlias, List
 
 import uharfbuzz as hb
 from blackrenderer.backends.svg import SVGSurface, SVGCanvas
@@ -74,9 +74,10 @@ class GlyphRun(NamedTuple):
     def draw(
         self,
         canvas: SVGCanvas,
-        foreground,
+        foreground: str | None = None,
+        palette: int | None = None,
     ):
-        self.font.draw_glyph_run(self, canvas, foreground=foreground)
+        self.font.draw_glyph_run(self, canvas, foreground=foreground, palette=palette)
 
 
 class GlyphLine(NamedTuple):
@@ -127,14 +128,15 @@ class GlyphLine(NamedTuple):
     def draw(
         self,
         canvas: SVGCanvas,
-        foreground,
+        foreground: str | None,
         x_offset: float = 0,
         y_offset: float = 0,
+        palette: int | None = None,
     ):
         with canvas.savedState():
             canvas.translate(self.x + x_offset, self.y + y_offset)
             for run in self.glyphs:
-                run.draw(canvas=canvas, foreground=foreground)
+                run.draw(canvas=canvas, foreground=foreground, palette=palette)
                 canvas.translate(run.width, 0)
 
 
@@ -330,27 +332,37 @@ class Font:
         self,
         glyph: GlyphInfo,
         canvas: SVGCanvas,
-        foreground=None,
+        foreground: str | None = None,
+        palette: int | None = None,
     ):
         brFont = self.brFont
         glyph_name = brFont.glyphNames[glyph.glyph]
+        if palette is not None:
+            palette: List[List[float, float, float, float]] = brFont.getPalette(palette)
+
         if foreground is not None:
-            brFont.drawGlyph(glyph_name, canvas, textColor=parseColor(foreground))
+            brFont.drawGlyph(
+                glyph_name,
+                canvas,
+                palette=palette,
+                textColor=parseColor(foreground),
+            )
         else:
-            brFont.drawGlyph(glyph_name, canvas)
+            brFont.drawGlyph(glyph_name, canvas, palette=palette)
 
     def draw_glyph_run(
         self,
         run: GlyphRun,
         canvas: SVGCanvas,
-        foreground,
+        foreground: str | None = None,
+        palette: int | None = None,
     ):
         self.set_location(run.location)
         with canvas.savedState():
             for glyph in run.glyphs:
                 with canvas.savedState():
                     canvas.translate(glyph.x_offset, glyph.y_offset)
-                    self.draw_glyph(glyph, canvas, foreground)
+                    self.draw_glyph(glyph, canvas, foreground, palette=palette)
                 canvas.translate(glyph.x_advance, glyph.y_advance)
 
 
@@ -476,6 +488,7 @@ def draw_lines(
     dark_foreground: None | str,
     dark_background: None | str,
     margin: float,
+    palette: int | None = None,
 ) -> ET.ElementTree:
     bounds: Rect | None = None
     for line in lines:
@@ -489,7 +502,12 @@ def draw_lines(
         for line in lines:
             # Center align the line.
             x_offset = (bounds[2] - line.rect[2]) / 2 - margin
-            line.draw(canvas=canvas, foreground=foreground, x_offset=x_offset)
+            line.draw(
+                canvas=canvas,
+                foreground=foreground,
+                x_offset=x_offset,
+                palette=palette,
+            )
 
     if dark_foreground or dark_background:
         return _set_dark_colors(

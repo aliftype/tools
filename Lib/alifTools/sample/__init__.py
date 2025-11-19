@@ -55,6 +55,7 @@ class TextRun(NamedTuple):
     features: Features
     location: Location
     string: str
+    eot: bool = False
 
 
 class GlyphInfo(NamedTuple):
@@ -104,18 +105,13 @@ class GlyphLine(NamedTuple):
             if len(text) > 1:
                 raise NotImplementedError("Can’t justify multi-run text")
             run = text[0]
-            glyphs_ = run.font.shape_justify(
-                run.string,
-                run.location,
-                run.features,
-                target_width,
-            )
+            glyphs_ = run.font.shape_justify(run, target_width)
             glyphs.append(glyphs_)
             rect = run.font.calc_glyph_bounds(glyphs_)
             width += glyphs_.width
         else:
             for run in text:
-                glyphs_ = run.font.shape(run.string, run.location, run.features)
+                glyphs_ = run.font.shape(run)
                 glyphs.append(glyphs_)
                 rect = run.font.calc_glyph_bounds(glyphs_).offset(width, 0).union(rect)
                 width += glyphs_.width
@@ -225,70 +221,81 @@ class Font:
     def _shape(
         self,
         buf: hb.Buffer,
-        text: str,
+        run: TextRun,
         location: Location,
-        features: Features,
-    ) -> float:
+    ) -> GlyphRun:
         self.set_location(location)
         buf.reset()
-        buf.add_str(text)
+        buf.add_str(run.string)
         # FIXME: do real bidi
-        if text[0] == "۝" and text[1:].isnumeric():
+        if run.string[0] == "۝" and run.string[1:].isnumeric():
             buf.direction = "ltr"
         buf.guess_segment_properties()
-        hb.shape(self.hbFont, buf, features=features)
-        return sum(g.x_advance for g in buf.glyph_positions)
+        hb.shape(self.hbFont, buf, features=run.features)
+        return self._make_glyphs(buf, run, location)
 
     def _make_glyphs(
         self,
         buf: hb.Buffer,
+        run: TextRun,
         location: Location,
-        width: float,
     ) -> GlyphRun:
         glyphs = []
-        for info, pos in zip(buf.glyph_infos, buf.glyph_positions):
+        width: int = 0
+        for i, (info, pos) in enumerate(zip(buf.glyph_infos, buf.glyph_positions)):
+            x_advance = pos.x_advance
+            x_offset = pos.x_offset
+            # HACK: do proper optical margins
+            if run.eot and i == len(buf.glyph_positions) - 1:
+                glyph_name: str = self.brFont.glyphNames[info.codepoint]
+                if glyph_name.startswith("endofayah-ar"):
+                    x_offset = -x_advance
+                    x_advance = 0
+
+            width += x_advance
             glyphs.append(
                 GlyphInfo(
                     glyph=info.codepoint,
-                    x_advance=pos.x_advance,
+                    x_advance=x_advance,
                     y_advance=pos.y_advance,
-                    x_offset=pos.x_offset,
+                    x_offset=x_offset,
                     y_offset=pos.y_offset,
                 )
             )
+
         return GlyphRun(font=self, location=location, glyphs=glyphs, width=width)
 
     def shape(
         self,
-        text: str,
-        location: Location,
-        features: Features,
+        run: TextRun,
     ) -> GlyphRun:
         buf = hb.Buffer()
-        width = self._shape(buf, text, location, features)
-        return self._make_glyphs(buf, location, width)
+        return self._shape(buf, run, run.location)
 
     def shape_justify(
         self,
-        text: str,
-        location: Location,
-        features: Features,
+        run: TextRun,
         target_width: float,
     ) -> GlyphRun:
         buf = hb.Buffer()
 
-        width = self._shape(buf, text, location, features)
+        glyph_run = self._shape(buf, run, run.location)
+        width = glyph_run.width
         if width >= target_width:
-            return self._make_glyphs(buf, location, width)
+            return glyph_run
 
         if (axis := next((a for a in self.axes if a.tag == "MSHQ"), None)) is None:
-            return self._make_glyphs(buf, location, width)
+            return glyph_run
 
         location = {axis.tag: axis.max_value}
-        max_width = self._shape(buf, text, location, features)
+        glyph_run = self._shape(buf, run, location)
+        max_width = glyph_run.width
+
+        def get_width(value):
+            return self._shape(buf, run, {axis.tag: value}).width
 
         location[axis.tag], width = solve_itp(
-            lambda x: self._shape(buf, text, {axis.tag: x}, features),
+            get_width,
             axis.default_value,
             axis.max_value,
             (axis.max_value - axis.default_value) / (1 << 14),
@@ -298,7 +305,7 @@ class Font:
             max_width,
         )
 
-        return self._make_glyphs(buf, location, width)
+        return self._make_glyphs(buf, run, location)
 
     def _glyph_bounds(
         self,

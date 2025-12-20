@@ -1,9 +1,13 @@
 import re
+from types import SimpleNamespace
 
 from ufo2ft.filters import BaseFilter
 
 tag = r"[a-zA-Z0-9]{4}"
 number = r"-?\d+(?:\.\d+)?"
+
+# GPOS
+
 # tag=number:number
 feaLib_vf_pos_re = re.compile(rf"{tag}\s*=\s*{number}\s*:{number}")
 # tag:number
@@ -78,17 +82,109 @@ def translate_value_record(match: re.Match, default_coords: str):
     return f"<{' '.join(scalars)}>"
 
 
-def transtate_gpos(fea, default_coords: str):
+def transtate_gpos(fea, context: SimpleNamespace):
     if has_feaLib_vf_gpos(fea):
         return fea
 
     # Convert ValueRecords
-    fea = value_record_re.sub(lambda m: translate_value_record(m, default_coords), fea)
+    fea = value_record_re.sub(
+        lambda m: translate_value_record(m, context.default_coords),
+        fea,
+    )
 
     # Convert Single Scalars
-    fea = scalar_re.sub(lambda m: translate_scalar(m, default_coords), fea)
+    fea = scalar_re.sub(
+        lambda m: translate_scalar(m, context.default_coords),
+        fea,
+    )
 
     return fea
+
+
+# GSUB
+
+# feature tag {...} tag;
+feature_re = re.compile(r"feature\s+(" + tag + r")\s*\{([\s\S]*?)\}\s*\1\s*;")
+# condition ...;
+condition_re = re.compile(r"condition\s*([^;]*);")
+# number < tag < number, with either limit allowed to be missing
+axis_range_re = re.compile(rf"(?:({number})\s*<\s*)?({tag})(?:\s*<\s*({number}))?")
+
+
+def parse_conditions(params: str):
+    # Parses 'min < tag < max' (allowing omitted bounds) into a tuple of (tag, min, max).
+    if not params.strip():
+        return None
+
+    conditions: list[tuple[str, str, str]] = []
+    for part in params.split(","):
+        part = part.strip()
+        assert "<" in part
+
+        if match := axis_range_re.search(part):
+            c_min, tag, c_max = match.groups()
+            conditions.append(
+                (
+                    tag,
+                    c_min if c_min is not None else "-10000",
+                    c_max if c_max is not None else "10000",
+                )
+            )
+
+    return tuple(sorted(conditions)) if conditions else None
+
+
+def get_condition_set(conditions: list[tuple[str, str, str]], context: SimpleNamespace):
+    # Gets the name of an condition set with the `conditions` or creates new one
+    if conditions not in context.condition_sets:
+        name = f"conditionseet_{len(context.condition_sets) + 1}"
+        conditions_str = ";\n".join([" ".join(c) for c in conditions])
+        condition_set = f"""\
+conditionset {name} {{
+    {conditions_str};
+}} {name};
+"""
+        context.condition_sets[conditions] = name
+        return name, condition_set
+    return context.condition_sets[conditions], None
+
+
+def translate_condition(m: re.Match, context: SimpleNamespace, tag: str):
+    # Converts `number < tag < number, ...` to
+    conditions = parse_conditions(m.group(1))
+    name, condition_set = get_condition_set(conditions, context)
+    return f"""\
+}} {tag};
+
+{condition_set if condition_set is not None else ""}
+
+variation {tag} {name} {{
+"""
+
+
+def translate_feature(m: re.Match, context):
+    # Splits the feature at condition set and inserts the feaLib conditionset
+    # in the middle
+    if not condition_re.search(m.group(2)):
+        return m.group(0)
+    tag = m.group(1)
+    content = condition_re.sub(
+        lambda m: translate_condition(m, context, tag),
+        m.group(2),
+    )
+
+    return f"""\
+feature {tag} {{
+{content}
+}} {tag};
+"""
+
+
+def translate_gsub(fea: str, context: SimpleNamespace):
+    return feature_re.sub(
+        lambda m: translate_feature(m, context),
+        fea,
+    )
 
 
 class VariableFeaConvertorFilter(BaseFilter):
@@ -96,5 +192,13 @@ class VariableFeaConvertorFilter(BaseFilter):
 
     def __call__(self, font, glyphSet=None):
         default_coords: str = self.options.default
-        font.features.text = transtate_gpos(font.features.text, default_coords)
+
+        context = self.set_context(font, glyphSet)
+        context.default_coords = default_coords
+        context.condition_sets = {}
+
+        fea = font.features.text
+        fea = transtate_gpos(fea, context)
+        fea = translate_gsub(fea, context)
+        font.features.text = fea
         return set()

@@ -36,14 +36,14 @@ def translate_axis_spec(axes: str):
     return ",".join(converted)
 
 
-def translate_scalar(match: re.Match, default_coords: str):
-    # Converts `10 (wdth:80) 20` to `(wght=400:10 wdth=80:20)`.
+def translate_scalar(match: re.Match):
+    # Converts `10 (wdth:80) 20` to `(10 wdth=80:20)`.
     tokens: list[str] = token_re.findall(match.group(0))
     if not tokens:
         return match.group(0)
 
     default_val = tokens.pop(0)
-    entries = [f"{default_coords}:{default_val}"]
+    entries = [f"{default_val}"]
 
     for i in range(0, len(tokens), 2):
         assert tokens[i].startswith("(")
@@ -54,10 +54,10 @@ def translate_scalar(match: re.Match, default_coords: str):
     return f"({' '.join(entries)})"
 
 
-def translate_value_record(match: re.Match, default_coords: str):
+def translate_value_record(match: re.Match):
     # Converts `<10 0 5 0 (wdth:80) 20 10 5 2 ...>` to
-    # `<(wdth=400:10 wdth=80:20) (wdth=400:0 wdth=80:10)
-    #   (wdth=400:5 wdth=80:5) (wdth=400:0 wdth=80:2)>`.
+    # `<(10 wdth=80:20) (0 wdth=80:10)
+    #   (5 wdth=80:5) (0 wdth=80:2)>`.
     tokens: list[str] = token_re.findall(match.group(1).strip())
     if len(tokens) < 5:
         return match.group(0)
@@ -74,7 +74,7 @@ def translate_value_record(match: re.Match, default_coords: str):
         if all(vals[i] == default_vals[i] for _, vals in masters):
             scalars.append(default_vals[i])
         else:
-            entries = [f"{default_coords}:{default_vals[i]}"]
+            entries = [f"{default_vals[i]}"]
             for axes, vals in masters:
                 entries.append(f"{axes}:{vals[i]}")
             scalars.append(f"({' '.join(entries)})")
@@ -82,19 +82,19 @@ def translate_value_record(match: re.Match, default_coords: str):
     return f"<{' '.join(scalars)}>"
 
 
-def transtate_gpos(fea, context: SimpleNamespace):
+def transtate_gpos(fea):
     if has_feaLib_vf_gpos(fea):
         return fea
 
     # Convert ValueRecords
     fea = value_record_re.sub(
-        lambda m: translate_value_record(m, context.default_coords),
+        lambda m: translate_value_record(m),
         fea,
     )
 
     # Convert Single Scalars
     fea = scalar_re.sub(
-        lambda m: translate_scalar(m, context.default_coords),
+        lambda m: translate_scalar(m),
         fea,
     )
 
@@ -188,17 +188,12 @@ def translate_gsub(fea: str, context: SimpleNamespace):
 
 
 class VariableFeaConvertorFilter(BaseFilter):
-    _args = ["default"]
-
     def __call__(self, font, glyphSet=None):
-        default_coords: str = self.options.default
-
         context = self.set_context(font, glyphSet)
-        context.default_coords = default_coords
         context.condition_sets = {}
 
         fea = font.features.text
-        fea = transtate_gpos(fea, context)
+        fea = transtate_gpos(fea)
         fea = translate_gsub(fea, context)
         font.features.text = fea
         return set()

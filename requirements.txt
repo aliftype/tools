@@ -26,9 +26,9 @@ pyclipper==1.4.0
     # via booleanoperations
 pyyaml==6.0.3
     # via AlifTools (pyproject.toml)
-ufo2ft==3.7.0
+ufo2ft==3.7.1
     # via AlifTools (pyproject.toml)
-uharfbuzz==0.53.3
+uharfbuzz==0.53.6
     # via
     #   AlifTools (pyproject.toml)
     #   blackrenderer

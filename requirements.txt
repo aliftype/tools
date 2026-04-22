@@ -20,7 +20,7 @@ fonttools[lxml,ufo]==4.62.1
     #   cffsubr
     #   fontmath
     #   ufo2ft
-lxml==6.0.4
+lxml==6.1.0
     # via fonttools
 pyclipper==1.4.0
     # via booleanoperations

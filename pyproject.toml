@@ -29,6 +29,7 @@ where = ["Lib"]
 check-shaping = "alifTools.shaping.check:main"
 update-shaping-tests = "alifTools.shaping.update:main"
 make-sample = "alifTools.sample:main"
+strip-glyph-names = "alifTools.glyphNames:main"
 
 [tool.setuptools_scm]
 version_file = "Lib/alifTools/_version.py"

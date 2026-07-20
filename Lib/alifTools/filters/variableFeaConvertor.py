@@ -301,7 +301,11 @@ def translate_feature(
         name, condition_set = get_condition_set(conds, context)
         if condition_set is not None:
             parts.append(f"\n{condition_set}")
-        rules = "\n".join(v.strip() for d in values for v in d.values())
+        # restore source order (overlay merges identical regions reversed)
+        rules = "\n".join(
+            text.strip()
+            for _, text in sorted((i, t) for d in values for i, t in d.items())
+        )
         parts.append(f"\nvariation {tag} {name} {{\n{rules}\n}} {tag};\n")
 
     return "".join(parts)

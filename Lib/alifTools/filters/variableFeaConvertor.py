@@ -28,10 +28,11 @@ value_record = r"<\s*((?:[^<>;]|<[^<>;]*>)*?)\s*>"
 value_record_re = re.compile(rf"{skip}|{value_record}")
 # keywords marking records that are not plain value records
 value_record_keyword_re = re.compile(r"\b(?:device|contourpoint|NULL)\b")
-# number (axis_spec) number, with a leading value record alternative so
-# numbers inside records and anchors are not read as scalars
+# number (axis_spec) number, allowing both space- and comma-separated
+# multi-axis locations, with a leading value record alternative so numbers
+# inside records and anchors are not read as scalars
 scalar_re = re.compile(
-    rf"{skip}|{value_record}|{number}(?:\s*\((?:\s*{axis_spec}\s*)+\)\s*{number})+"
+    rf"{skip}|{value_record}|{number}(?:\s*\(\s*{axis_spec}(?:\s*,?\s*{axis_spec})*\s*\)\s*{number})+"
 )
 
 

@@ -145,6 +145,10 @@ def translate_value_record(match: re.Match, default_coords: str):
     return f"<{' '.join(scalars)}>"
 
 
+# Strip static-only code
+ifndef_re = re.compile(r"[^\S\n]*#ifndef\s+VARIABLE[^\n]*\n[\s\S]*?#endif[^\n]*\n?")
+
+
 def translate_gpos(fea, context: SimpleNamespace):
     # Convert ValueRecords
     fea = value_record_re.sub(
@@ -339,6 +343,7 @@ class VariableFeaConvertorFilter(BaseFilter):
         fea = font.features.text or ""
         if not fea:
             return set()
+        fea = ifndef_re.sub("", fea)
         fea = translate_gpos(fea, context)
         fea = translate_gsub(fea, context)
         font.features.text = fea

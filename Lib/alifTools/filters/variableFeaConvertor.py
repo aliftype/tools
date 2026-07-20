@@ -1,6 +1,7 @@
 import re
 from types import SimpleNamespace
 
+from fontTools.misc.roundTools import otRound
 from ufo2ft.filters import BaseFilter
 
 tag = r"[a-zA-Z0-9]{4}"
@@ -31,6 +32,11 @@ def has_feaLib_vf_gpos(fea: str):
     return feaLib_vf_pos_re.search(fea) is not None
 
 
+def format_value(value: str):
+    # feaLib scalar values must be integers.
+    return str(otRound(float(value)))
+
+
 def translate_axis_spec(axes: str):
     # Converts `(wdth:80)` to `wdth=80`.
     axes = axes.strip("() ")
@@ -49,14 +55,14 @@ def translate_scalar(match: re.Match, default_coords: str):
         return match.group(0)
 
     default_val = tokens.pop(0)
-    entries = [f"{default_coords}:{default_val}"]
+    entries = [f"{default_coords}:{format_value(default_val)}"]
 
     for i in range(0, len(tokens), 2):
         if not tokens[i].startswith("("):
             raise ValueError(f"invalid variable position value: {match.group(0)!r}")
         axes = translate_axis_spec(tokens[i])
         val = tokens[i + 1]
-        entries.append(f"{axes}:{val}")
+        entries.append(f"{axes}:{format_value(val)}")
 
     return f"({' '.join(entries)})"
 
@@ -74,17 +80,15 @@ def translate_anchor(match: re.Match, record: str, default_coords: str):
     tokens: list[str] = token_re.findall(record.strip()[len("anchor") :])
     if len(tokens) < 5 or (len(tokens) - 2) % 3 != 0:
         raise ValueError(f"invalid variable anchor: <{record}>")
-    default_vals = tokens[:2]
+    default_vals = [format_value(v) for v in tokens[:2]]
     masters: list[tuple[str, list[str]]] = []
     for i in range(2, len(tokens), 3):
         if not tokens[i].startswith("("):
             raise ValueError(f"invalid variable anchor: <{record}>")
         axes = translate_axis_spec(tokens[i])
         if not axes:
-            raise ValueError(
-                f"invalid axis location {tokens[i]} in anchor: <{record}>"
-            )
-        vals = tokens[i + 1 : i + 3]
+            raise ValueError(f"invalid axis location {tokens[i]} in anchor: <{record}>")
+        vals = [format_value(v) for v in tokens[i + 1 : i + 3]]
         masters.append((axes, vals))
     scalars: list[str] = []
     for i in range(2):
@@ -116,7 +120,7 @@ def translate_value_record(match: re.Match, default_coords: str):
     if len(tokens) < 9 or (len(tokens) - 4) % 5 != 0:
         raise ValueError(f"invalid variable value record: <{record}>")
 
-    default_vals = tokens[:4]
+    default_vals = [format_value(v) for v in tokens[:4]]
     masters: list[tuple[str, list[str]]] = []
     for i in range(4, len(tokens), 5):
         if not tokens[i].startswith("("):
@@ -126,7 +130,7 @@ def translate_value_record(match: re.Match, default_coords: str):
             raise ValueError(
                 f"invalid axis location {tokens[i]} in value record: <{record}>"
             )
-        vals = tokens[i + 1 : i + 5]
+        vals = [format_value(v) for v in tokens[i + 1 : i + 5]]
         masters.append((axes, vals))
 
     scalars: list[str] = []
@@ -154,9 +158,11 @@ def translate_gpos(fea, context: SimpleNamespace):
 
     # Convert Single Scalars
     fea = scalar_re.sub(
-        lambda m: m.group(0)
-        if m.group(0).startswith("<")
-        else translate_scalar(m, context.default_coords),
+        lambda m: (
+            m.group(0)
+            if m.group(0).startswith("<")
+            else translate_scalar(m, context.default_coords)
+        ),
         fea,
     )
 

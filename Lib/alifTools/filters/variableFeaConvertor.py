@@ -234,6 +234,15 @@ variation {tag} {name} {{
 def translate_feature(body: str, masked_body: str, tag: str, context: SimpleNamespace):
     # Splits the feature at condition statements and inserts the feaLib conditionset
     # in the middle
+    for m in condition_re.finditer(masked_body):
+        depth = masked_body.count("{", 0, m.start()) - masked_body.count(
+            "}", 0, m.start()
+        )
+        if depth > 0:
+            raise ValueError(
+                f"condition statement inside a lookup block is not supported "
+                f"in feature '{tag}': {m.group(0).strip()}"
+            )
     content = condition_sub_re.sub(
         lambda m: (
             m.group(0)

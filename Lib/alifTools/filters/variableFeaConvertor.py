@@ -168,9 +168,7 @@ def translate_gpos(fea, context: SimpleNamespace):
     # Convert ValueRecords
     fea = value_record_re.sub(
         lambda m: (
-            m.group(0)
-            if m.group(0)[0] in '#"'
-            else translate_value_record(m, context)
+            m.group(0) if m.group(0)[0] in '#"' else translate_value_record(m, context)
         ),
         fea,
     )
@@ -178,9 +176,7 @@ def translate_gpos(fea, context: SimpleNamespace):
     # Convert Single Scalars
     fea = scalar_re.sub(
         lambda m: (
-            m.group(0)
-            if m.group(0)[0] in '#"<'
-            else translate_scalar(m, context)
+            m.group(0) if m.group(0)[0] in '#"<' else translate_scalar(m, context)
         ),
         fea,
     )
@@ -215,8 +211,16 @@ def parse_conditions(params: str, mappings=None):
         if match is None or (match.group(1) is None and match.group(3) is None):
             raise ValueError(f"invalid condition axis range: '{part.strip()}'")
         c_min, tag, c_max = match.groups()
-        c_min = map_coordinate(mappings, tag, float(c_min)) if c_min is not None else MIN_VALUE
-        c_max = map_coordinate(mappings, tag, float(c_max)) if c_max is not None else MAX_VALUE
+        c_min = (
+            map_coordinate(mappings, tag, float(c_min))
+            if c_min is not None
+            else MIN_VALUE
+        )
+        c_max = (
+            map_coordinate(mappings, tag, float(c_max))
+            if c_max is not None
+            else MAX_VALUE
+        )
         # multiple ranges for the same axis are intersected
         if tag in ranges:
             c_min = max(c_min, ranges[tag][0])
@@ -241,6 +245,15 @@ conditionset {name} {{
         context.condition_sets[conditions] = name
         return name, condition_set
     return context.condition_sets[conditions], None
+
+
+def box_within(a: dict, b: dict):
+    for axis in set(a) | set(b):
+        a_min, a_max = a.get(axis, (MIN_VALUE, MAX_VALUE))
+        b_min, b_max = b.get(axis, (MIN_VALUE, MAX_VALUE))
+        if a_min < b_min or a_max > b_max:
+            return False
+    return True
 
 
 def split_at_conditions(body: str, masked_body: str, mappings=None):
@@ -296,7 +309,19 @@ def translate_feature(
             for i, (conds, text) in enumerate(conditional)
         ]
     )
-    for box, values in overlaid:
+
+    # overlayFeatureVariations skips single-point overlaps; keep a pinned
+    # region ahead of any broader one that contains it
+    ordered = []
+    for item in overlaid:
+        index = len(ordered)
+        for i, other in enumerate(ordered):
+            if box_within(item[0], other[0]):
+                index = i
+                break
+        ordered.insert(index, item)
+
+    for box, values in ordered:
         conds = tuple(sorted((t, str(mn), str(mx)) for t, (mn, mx) in box.items()))
         name, condition_set = get_condition_set(conds, context)
         if condition_set is not None:

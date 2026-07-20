@@ -161,7 +161,30 @@ def translate_value_record(match: re.Match, context: SimpleNamespace):
 
 
 # Strip static-only code
-ifndef_re = re.compile(r"[^\S\n]*#ifndef\s+VARIABLE[^\n]*\n[\s\S]*?#endif[^\n]*\n?")
+ifndef_re = re.compile(
+    r"[^\S\n]*#ifndef\s+VARIABLE[^\n]*\n(?:(?!#ifn?def)[\s\S])*?#endif[^\n]*\n?"
+)
+ifndef_start_re = re.compile(r"#ifndef\s+VARIABLE")
+
+
+def strip_ifndef(fea: str):
+    fea = ifndef_re.sub("", fea)
+    # An unterminated #ifndef VARIABLE runs to the end of the enclosing
+    # feature code, like in Glyphs.
+    while m := ifndef_start_re.search(fea):
+        masked = blank_comments_and_strings(fea)
+        end = len(fea)
+        depth = 0
+        for i in range(m.end(), len(fea)):
+            if masked[i] == "{":
+                depth += 1
+            elif masked[i] == "}":
+                if depth == 0:
+                    end = i
+                    break
+                depth -= 1
+        fea = fea[: m.start()] + fea[end:]
+    return fea
 
 
 def translate_gpos(fea, context: SimpleNamespace):
@@ -412,7 +435,7 @@ class VariableFeaConvertorFilter(BaseFilter):
         fea = font.features.text or ""
         if not fea:
             return set()
-        fea = ifndef_re.sub("", fea)
+        fea = strip_ifndef(fea)
         fea = translate_gpos(fea, context)
         fea = translate_gsub(fea, context)
         font.features.text = fea

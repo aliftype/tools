@@ -30,10 +30,6 @@ scalar_re = re.compile(
 )
 
 
-def has_feaLib_vf_gpos(fea: str):
-    return feaLib_vf_pos_re.search(fea) is not None
-
-
 def format_value(value: str):
     # feaLib scalar values must be integers.
     return str(otRound(float(value)))
@@ -149,9 +145,6 @@ def translate_value_record(match: re.Match, default_coords: str):
 
 
 def translate_gpos(fea, context: SimpleNamespace):
-    if has_feaLib_vf_gpos(fea):
-        return fea
-
     # Convert ValueRecords
     fea = value_record_re.sub(
         lambda m: m.group(0)

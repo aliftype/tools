@@ -1,3 +1,4 @@
+import logging
 import re
 from types import SimpleNamespace
 
@@ -5,6 +6,8 @@ from fontTools.misc.roundTools import otRound
 from fontTools.varLib.featureVars import overlayFeatureVariations
 from fontTools.varLib.models import piecewiseLinearMap
 from ufo2ft.filters import BaseFilter
+
+logger = logging.getLogger(__name__)
 
 tag = r"[a-zA-Z0-9]{4}"
 number = r"-?\d+(?:\.\d+)?"
@@ -346,6 +349,15 @@ class VariableFeaConvertorFilter(BaseFilter):
     _args = ["default"]
     # per-axis {design: user} maps (Axis Location / Axis Mappings)
     _kwargs = {"mappings": None}
+
+    def __init__(self, *args, **kwargs):
+        if kwargs.get("include") is not None or kwargs.get("exclude") is not None:
+            logger.warning(
+                "%s converts the font's whole feature file; "
+                "include/exclude have no effect",
+                type(self).__name__,
+            )
+        super().__init__(*args, **kwargs)
 
     def __call__(self, font, glyphSet=None):
         default_coords: str = self.options.default

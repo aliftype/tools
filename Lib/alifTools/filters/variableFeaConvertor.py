@@ -190,8 +190,8 @@ def translate_gpos(fea, context: SimpleNamespace):
 
 # GSUB
 
-# feature tag {
-feature_start_re = re.compile(rf"feature\s+({tag})\s*\{{")
+# feature tag [useExtension] {
+feature_start_re = re.compile(rf"feature\s+({tag})(\s+useExtension)?\s*\{{")
 # condition ...; (as a whole word, not e.g. a glyph name like a.condition)
 condition = r"(?<![\w.])condition\b\s*([^;]*);"
 condition_re = re.compile(condition)
@@ -254,7 +254,13 @@ def split_at_conditions(body: str, masked_body: str, mappings=None):
     return segments
 
 
-def translate_feature(body: str, masked_body: str, tag: str, context: SimpleNamespace):
+def translate_feature(
+    body: str,
+    masked_body: str,
+    tag: str,
+    context: SimpleNamespace,
+    use_extension: str = "",
+):
     # Splits the feature at condition statements and emits the unconditional
     # rules in the feature block, followed by variation blocks for the
     # conditional rules
@@ -280,7 +286,8 @@ def translate_feature(body: str, masked_body: str, tag: str, context: SimpleName
         elif text.strip():
             conditional.append((conds, text))
 
-    parts = [f"feature {tag} {{\n{''.join(base).strip()}\n}} {tag};\n"]
+    # useExtension is only valid on the feature block, not on variation blocks
+    parts = [f"feature {tag}{use_extension} {{\n{''.join(base).strip()}\n}} {tag};\n"]
 
     # non-overlapping regions, most specific first
     overlaid = overlayFeatureVariations(
@@ -338,7 +345,13 @@ def translate_gsub(fea: str, context: SimpleNamespace):
         else:
             out.append(fea[pos : m.start()])
             out.append(
-                translate_feature(fea[m.end() : close], masked_body, tag, context)
+                translate_feature(
+                    fea[m.end() : close],
+                    masked_body,
+                    tag,
+                    context,
+                    use_extension=" useExtension" if m.group(2) else "",
+                )
             )
         pos = end
     out.append(fea[pos:])

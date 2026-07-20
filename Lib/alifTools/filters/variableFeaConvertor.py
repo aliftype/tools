@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from fontTools.misc.roundTools import otRound
 from fontTools.varLib.featureVars import overlayFeatureVariations
+from fontTools.varLib.models import piecewiseLinearMap
 from ufo2ft.filters import BaseFilter
 
 tag = r"[a-zA-Z0-9]{4}"
@@ -36,37 +37,48 @@ def format_value(value: str):
     return str(otRound(float(value)))
 
 
-def translate_axis_spec(axes: str):
+def map_coordinate(mappings, tag: str, value: float):
+    # Glyphs coordinates are design-space; feaLib wants user-space.
+    mapping = (mappings or {}).get(tag)
+    if not mapping:
+        return value
+    mapping = {float(k): float(v) for k, v in mapping.items()}
+    return round(piecewiseLinearMap(value, mapping), 2)
+
+
+def translate_axis_spec(axes: str, mappings=None):
     # Converts `(wdth:80)` to `wdth=80`.
     axes = axes.strip("() ")
     parts: list[str] = axis_spec_re.findall(axes)
     converted = []
     for part in parts:
         axis, val = part.split(":")
-        converted.append(f"{axis.strip()}={val.strip()}")
+        axis = axis.strip()
+        val = map_coordinate(mappings, axis, float(val))
+        converted.append(f"{axis}={val}")
     return ",".join(converted)
 
 
-def translate_scalar(match: re.Match, default_coords: str):
+def translate_scalar(match: re.Match, context: SimpleNamespace):
     # Converts `10 (wdth:80) 20` to `(wght=400:10 wdth=80:20)`.
     tokens: list[str] = token_re.findall(match.group(0))
     if not tokens:
         return match.group(0)
 
     default_val = tokens.pop(0)
-    entries = [f"{default_coords}:{format_value(default_val)}"]
+    entries = [f"{context.default_coords}:{format_value(default_val)}"]
 
     for i in range(0, len(tokens), 2):
         if not tokens[i].startswith("("):
             raise ValueError(f"invalid variable position value: {match.group(0)!r}")
-        axes = translate_axis_spec(tokens[i])
+        axes = translate_axis_spec(tokens[i], context.mappings)
         val = tokens[i + 1]
         entries.append(f"{axes}:{format_value(val)}")
 
     return f"({' '.join(entries)})"
 
 
-def translate_anchor(match: re.Match, record: str, default_coords: str):
+def translate_anchor(match: re.Match, record: str, context: SimpleNamespace):
     # Converts `<anchor 100 200 (wght:900) 150 260>` to
     # `<anchor (wght=400:100 wght=900:150) (wght=400:200 wght=900:260)>`.
     if (
@@ -84,7 +96,7 @@ def translate_anchor(match: re.Match, record: str, default_coords: str):
     for i in range(2, len(tokens), 3):
         if not tokens[i].startswith("("):
             raise ValueError(f"invalid variable anchor: <{record}>")
-        axes = translate_axis_spec(tokens[i])
+        axes = translate_axis_spec(tokens[i], context.mappings)
         if not axes:
             raise ValueError(f"invalid axis location {tokens[i]} in anchor: <{record}>")
         vals = [format_value(v) for v in tokens[i + 1 : i + 3]]
@@ -94,20 +106,20 @@ def translate_anchor(match: re.Match, record: str, default_coords: str):
         if all(vals[i] == default_vals[i] for _, vals in masters):
             scalars.append(default_vals[i])
         else:
-            entries = [f"{default_coords}:{default_vals[i]}"]
+            entries = [f"{context.default_coords}:{default_vals[i]}"]
             for axes, vals in masters:
                 entries.append(f"{axes}:{vals[i]}")
             scalars.append(f"({' '.join(entries)})")
     return f"<anchor {' '.join(scalars)}>"
 
 
-def translate_value_record(match: re.Match, default_coords: str):
+def translate_value_record(match: re.Match, context: SimpleNamespace):
     # Converts `<10 0 5 0 (wdth:80) 20 10 5 2 ...>` to
     # `<(wdth=400:10 wdth=80:20) (wdth=400:0 wdth=80:10)
     #   (wdth=400:5 wdth=80:5) (wdth=400:0 wdth=80:2)>`.
     record = match.group(1)
     if record.strip().startswith("anchor"):
-        return translate_anchor(match, record, default_coords)
+        return translate_anchor(match, record, context)
     if (
         "(" not in record
         or value_record_keyword_re.search(record)
@@ -124,7 +136,7 @@ def translate_value_record(match: re.Match, default_coords: str):
     for i in range(4, len(tokens), 5):
         if not tokens[i].startswith("("):
             raise ValueError(f"invalid variable value record: <{record}>")
-        axes = translate_axis_spec(tokens[i])
+        axes = translate_axis_spec(tokens[i], context.mappings)
         if not axes:
             raise ValueError(
                 f"invalid axis location {tokens[i]} in value record: <{record}>"
@@ -137,7 +149,7 @@ def translate_value_record(match: re.Match, default_coords: str):
         if all(vals[i] == default_vals[i] for _, vals in masters):
             scalars.append(default_vals[i])
         else:
-            entries = [f"{default_coords}:{default_vals[i]}"]
+            entries = [f"{context.default_coords}:{default_vals[i]}"]
             for axes, vals in masters:
                 entries.append(f"{axes}:{vals[i]}")
             scalars.append(f"({' '.join(entries)})")
@@ -155,7 +167,7 @@ def translate_gpos(fea, context: SimpleNamespace):
         lambda m: (
             m.group(0)
             if m.group(0)[0] in '#"'
-            else translate_value_record(m, context.default_coords)
+            else translate_value_record(m, context)
         ),
         fea,
     )
@@ -165,7 +177,7 @@ def translate_gpos(fea, context: SimpleNamespace):
         lambda m: (
             m.group(0)
             if m.group(0)[0] in '#"<'
-            else translate_scalar(m, context.default_coords)
+            else translate_scalar(m, context)
         ),
         fea,
     )
@@ -188,7 +200,7 @@ MIN_VALUE = -10000
 MAX_VALUE = 10000
 
 
-def parse_conditions(params: str):
+def parse_conditions(params: str, mappings=None):
     # Parses 'min < tag < max' (allowing one omitted bound) into a tuple of
     # (tag, min, max). Returns None for a bare 'condition;'.
     if not params.strip():
@@ -200,8 +212,8 @@ def parse_conditions(params: str):
         if match is None or (match.group(1) is None and match.group(3) is None):
             raise ValueError(f"invalid condition axis range: '{part.strip()}'")
         c_min, tag, c_max = match.groups()
-        c_min = float(c_min) if c_min is not None else MIN_VALUE
-        c_max = float(c_max) if c_max is not None else MAX_VALUE
+        c_min = map_coordinate(mappings, tag, float(c_min)) if c_min is not None else MIN_VALUE
+        c_max = map_coordinate(mappings, tag, float(c_max)) if c_max is not None else MAX_VALUE
         # multiple ranges for the same axis are intersected
         if tag in ranges:
             c_min = max(c_min, ranges[tag][0])
@@ -228,12 +240,12 @@ conditionset {name} {{
     return context.condition_sets[conditions], None
 
 
-def split_at_conditions(body: str, masked_body: str):
+def split_at_conditions(body: str, masked_body: str, mappings=None):
     segments = []
     last, conds = 0, None
     for m in condition_re.finditer(masked_body):
         segments.append((conds, body[last : m.start()]))
-        conds = parse_conditions(m.group(1))
+        conds = parse_conditions(m.group(1), mappings)
         last = m.end()
     segments.append((conds, body[last:]))
     return segments
@@ -253,7 +265,7 @@ def translate_feature(body: str, masked_body: str, tag: str, context: SimpleName
                 f"in feature '{tag}': {m.group(0).strip()}"
             )
 
-    segments = split_at_conditions(body, masked_body)
+    segments = split_at_conditions(body, masked_body, context.mappings)
     base = [segments[0][1]]
     conditional = []
     for conds, text in segments[1:]:
@@ -332,12 +344,15 @@ def translate_gsub(fea: str, context: SimpleNamespace):
 
 class VariableFeaConvertorFilter(BaseFilter):
     _args = ["default"]
+    # per-axis {design: user} maps (Axis Location / Axis Mappings)
+    _kwargs = {"mappings": None}
 
     def __call__(self, font, glyphSet=None):
         default_coords: str = self.options.default
 
         context = self.set_context(font, glyphSet)
         context.default_coords = default_coords
+        context.mappings = self.options.mappings or {}
         context.condition_sets = {}
 
         fea = font.features.text or ""

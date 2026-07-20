@@ -223,8 +223,9 @@ def translate_gpos(fea, context: SimpleNamespace):
 
 # feature tag [useExtension] {
 feature_start_re = re.compile(rf"feature\s+({tag})(\s+useExtension)?\s*\{{")
-# condition ...; (as a whole word, not e.g. a glyph name like a.condition)
-condition = r"(?<![\w.])condition\b\s*([^;]*);"
+# condition ...; (as a whole word, not part of a glyph name like a.condition
+# or condition.alt)
+condition = r"(?<![\w.])condition(?![\w.])\s*([^;]*);"
 condition_re = re.compile(condition)
 # number < tag < number, with either limit allowed to be missing
 axis_range_re = re.compile(rf"(?:({number})\s*<\s*)?({tag})(?:\s*<\s*({number}))?")

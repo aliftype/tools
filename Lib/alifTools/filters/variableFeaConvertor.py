@@ -179,28 +179,36 @@ condition_sub_re = re.compile(rf"{skip}|{condition}")
 # number < tag < number, with either limit allowed to be missing
 axis_range_re = re.compile(rf"(?:({number})\s*<\s*)?({tag})(?:\s*<\s*({number}))?")
 
+# unbounded-range fill-ins; feaLib clamps them to the real axis range
+MIN_VALUE = -10000
+MAX_VALUE = 10000
+
 
 def parse_conditions(params: str):
-    # Parses 'min < tag < max' (allowing omitted bounds) into a tuple of (tag, min, max).
+    # Parses 'min < tag < max' (allowing one omitted bound) into a tuple of
+    # (tag, min, max). Returns None for a bare 'condition;'.
     if not params.strip():
         return None
 
-    conditions: list[tuple[str, str, str]] = []
+    ranges: dict[str, tuple[float, float]] = {}
     for part in params.split(","):
-        part = part.strip()
-        assert "<" in part
+        match = axis_range_re.fullmatch(part.strip())
+        if match is None or (match.group(1) is None and match.group(3) is None):
+            raise ValueError(f"invalid condition axis range: '{part.strip()}'")
+        c_min, tag, c_max = match.groups()
+        c_min = float(c_min) if c_min is not None else MIN_VALUE
+        c_max = float(c_max) if c_max is not None else MAX_VALUE
+        # multiple ranges for the same axis are intersected
+        if tag in ranges:
+            c_min = max(c_min, ranges[tag][0])
+            c_max = min(c_max, ranges[tag][1])
+            if c_min > c_max:
+                raise ValueError(f"empty condition range for axis '{tag}'")
+        ranges[tag] = (c_min, c_max)
 
-        if match := axis_range_re.search(part):
-            c_min, tag, c_max = match.groups()
-            conditions.append(
-                (
-                    tag,
-                    c_min if c_min is not None else "-10000",
-                    c_max if c_max is not None else "10000",
-                )
-            )
-
-    return tuple(sorted(conditions)) if conditions else None
+    return tuple(
+        sorted((t, str(mn), str(mx)) for t, (mn, mx) in ranges.items())
+    )
 
 
 def get_condition_set(conditions: list[tuple[str, str, str]], context: SimpleNamespace):

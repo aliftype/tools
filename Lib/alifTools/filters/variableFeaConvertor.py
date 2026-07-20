@@ -197,7 +197,9 @@ class VariableFeaConvertorFilter(BaseFilter):
         context.default_coords = default_coords
         context.condition_sets = {}
 
-        fea = font.features.text
+        fea = font.features.text or ""
+        if not fea:
+            return set()
         fea = transtate_gpos(fea, context)
         fea = translate_gsub(fea, context)
         font.features.text = fea

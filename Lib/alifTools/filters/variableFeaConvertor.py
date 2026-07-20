@@ -248,8 +248,6 @@ def parse_conditions(params: str, mappings=None):
         if tag in ranges:
             c_min = max(c_min, ranges[tag][0])
             c_max = min(c_max, ranges[tag][1])
-            if c_min > c_max:
-                raise ValueError(f"empty condition range for axis '{tag}'")
         ranges[tag] = (c_min, c_max)
 
     return tuple(sorted((t, str(mn), str(mx)) for t, (mn, mx) in ranges.items()))
@@ -320,7 +318,18 @@ def translate_feature(
             # in every variation record, so they also apply inside regions.
             base.append(text)
         elif text.strip():
-            conditional.append((conds, text))
+            if all(float(mn) <= float(mx) for _, mn, mx in conds):
+                conditional.append((conds, text))
+            else:
+                # Glyphs ships these rules in a dead FeatureVariations record,
+                # which feaLib rejects outright; dropping them is equivalent.
+                ranges = ", ".join(f"{mn} < {t} < {mx}" for t, mn, mx in conds)
+                logger.warning(
+                    "dropping rules in feature '%s': condition '%s' can "
+                    "never match",
+                    tag,
+                    ranges,
+                )
 
     # useExtension is only valid on the feature block, not on variation blocks
     parts = [f"feature {tag}{use_extension} {{\n{''.join(base).strip()}\n}} {tag};\n"]

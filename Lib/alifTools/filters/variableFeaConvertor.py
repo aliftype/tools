@@ -82,7 +82,7 @@ def translate_value_record(match: re.Match, default_coords: str):
     return f"<{' '.join(scalars)}>"
 
 
-def transtate_gpos(fea, context: SimpleNamespace):
+def translate_gpos(fea, context: SimpleNamespace):
     if has_feaLib_vf_gpos(fea):
         return fea
 
@@ -137,7 +137,7 @@ def parse_conditions(params: str):
 def get_condition_set(conditions: list[tuple[str, str, str]], context: SimpleNamespace):
     # Gets the name of an condition set with the `conditions` or creates new one
     if conditions not in context.condition_sets:
-        name = f"conditionseet_{len(context.condition_sets) + 1}"
+        name = f"conditionset_{len(context.condition_sets) + 1}"
         conditions_str = ";\n".join([" ".join(c) for c in conditions])
         condition_set = f"""\
 conditionset {name} {{
@@ -200,7 +200,7 @@ class VariableFeaConvertorFilter(BaseFilter):
         fea = font.features.text or ""
         if not fea:
             return set()
-        fea = transtate_gpos(fea, context)
+        fea = translate_gpos(fea, context)
         fea = translate_gsub(fea, context)
         font.features.text = fea
         return set()

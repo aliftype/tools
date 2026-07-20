@@ -52,7 +52,8 @@ def translate_scalar(match: re.Match, default_coords: str):
     entries = [f"{default_coords}:{default_val}"]
 
     for i in range(0, len(tokens), 2):
-        assert tokens[i].startswith("(")
+        if not tokens[i].startswith("("):
+            raise ValueError(f"invalid variable position value: {match.group(0)!r}")
         axes = translate_axis_spec(tokens[i])
         val = tokens[i + 1]
         entries.append(f"{axes}:{val}")
@@ -71,12 +72,18 @@ def translate_anchor(match: re.Match, record: str, default_coords: str):
     ):
         return match.group(0)
     tokens: list[str] = token_re.findall(record.strip()[len("anchor") :])
-    if len(tokens) < 5:
-        return match.group(0)
+    if len(tokens) < 5 or (len(tokens) - 2) % 3 != 0:
+        raise ValueError(f"invalid variable anchor: <{record}>")
     default_vals = tokens[:2]
     masters: list[tuple[str, list[str]]] = []
     for i in range(2, len(tokens), 3):
+        if not tokens[i].startswith("("):
+            raise ValueError(f"invalid variable anchor: <{record}>")
         axes = translate_axis_spec(tokens[i])
+        if not axes:
+            raise ValueError(
+                f"invalid axis location {tokens[i]} in anchor: <{record}>"
+            )
         vals = tokens[i + 1 : i + 3]
         masters.append((axes, vals))
     scalars: list[str] = []
@@ -106,13 +113,19 @@ def translate_value_record(match: re.Match, default_coords: str):
         return match.group(0)
 
     tokens: list[str] = token_re.findall(record.strip())
-    if len(tokens) < 5:
-        return match.group(0)
+    if len(tokens) < 9 or (len(tokens) - 4) % 5 != 0:
+        raise ValueError(f"invalid variable value record: <{record}>")
 
     default_vals = tokens[:4]
     masters: list[tuple[str, list[str]]] = []
     for i in range(4, len(tokens), 5):
+        if not tokens[i].startswith("("):
+            raise ValueError(f"invalid variable value record: <{record}>")
         axes = translate_axis_spec(tokens[i])
+        if not axes:
+            raise ValueError(
+                f"invalid axis location {tokens[i]} in value record: <{record}>"
+            )
         vals = tokens[i + 1 : i + 5]
         masters.append((axes, vals))
 

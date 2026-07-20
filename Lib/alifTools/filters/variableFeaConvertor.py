@@ -15,10 +15,16 @@ axis_spec = rf"{tag}\s*:\s*{number}"
 axis_spec_re = re.compile(axis_spec)
 # (...) | number
 token_re = re.compile(rf"\([\s\S]*?\)|{number}")
-# <...>
-value_record_re = re.compile(r"<\s*([^>;]+?)\s*>")
-# number (axis_spec) number
-scalar_re = re.compile(rf"{number}(?:\s*\((?:\s*{axis_spec}\s*)+\)\s*{number})+")
+# <...>, allowing a nested <...> (e.g. a device table)
+value_record = r"<\s*((?:[^<>;]|<[^<>;]*>)*?)\s*>"
+value_record_re = re.compile(value_record)
+# keywords marking records that are not plain value records
+value_record_keyword_re = re.compile(r"\b(?:device|contourpoint|NULL)\b")
+# number (axis_spec) number, with a leading value record alternative so
+# numbers inside records and anchors are not read as scalars
+scalar_re = re.compile(
+    rf"{value_record}|{number}(?:\s*\((?:\s*{axis_spec}\s*)+\)\s*{number})+"
+)
 
 
 def has_feaLib_vf_gpos(fea: str):
@@ -54,11 +60,52 @@ def translate_scalar(match: re.Match, default_coords: str):
     return f"({' '.join(entries)})"
 
 
+def translate_anchor(match: re.Match, record: str, default_coords: str):
+    # Converts `<anchor 100 200 (wght:900) 150 260>` to
+    # `<anchor (wght=400:100 wght=900:150) (wght=400:200 wght=900:260)>`.
+    if (
+        "(" not in record
+        or "NULL" in record
+        or "contourpoint" in record
+        or feaLib_vf_pos_re.search(record)
+    ):
+        return match.group(0)
+    tokens: list[str] = token_re.findall(record.strip()[len("anchor") :])
+    if len(tokens) < 5:
+        return match.group(0)
+    default_vals = tokens[:2]
+    masters: list[tuple[str, list[str]]] = []
+    for i in range(2, len(tokens), 3):
+        axes = translate_axis_spec(tokens[i])
+        vals = tokens[i + 1 : i + 3]
+        masters.append((axes, vals))
+    scalars: list[str] = []
+    for i in range(2):
+        if all(vals[i] == default_vals[i] for _, vals in masters):
+            scalars.append(default_vals[i])
+        else:
+            entries = [f"{default_coords}:{default_vals[i]}"]
+            for axes, vals in masters:
+                entries.append(f"{axes}:{vals[i]}")
+            scalars.append(f"({' '.join(entries)})")
+    return f"<anchor {' '.join(scalars)}>"
+
+
 def translate_value_record(match: re.Match, default_coords: str):
     # Converts `<10 0 5 0 (wdth:80) 20 10 5 2 ...>` to
     # `<(wdth=400:10 wdth=80:20) (wdth=400:0 wdth=80:10)
     #   (wdth=400:5 wdth=80:5) (wdth=400:0 wdth=80:2)>`.
-    tokens: list[str] = token_re.findall(match.group(1).strip())
+    record = match.group(1)
+    if record.strip().startswith("anchor"):
+        return translate_anchor(match, record, default_coords)
+    if (
+        "(" not in record
+        or value_record_keyword_re.search(record)
+        or feaLib_vf_pos_re.search(record)
+    ):
+        return match.group(0)
+
+    tokens: list[str] = token_re.findall(record.strip())
     if len(tokens) < 5:
         return match.group(0)
 
@@ -94,7 +141,9 @@ def translate_gpos(fea, context: SimpleNamespace):
 
     # Convert Single Scalars
     fea = scalar_re.sub(
-        lambda m: translate_scalar(m, context.default_coords),
+        lambda m: m.group(0)
+        if m.group(0).startswith("<")
+        else translate_scalar(m, context.default_coords),
         fea,
     )
 

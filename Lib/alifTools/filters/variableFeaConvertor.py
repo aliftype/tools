@@ -16,15 +16,17 @@ axis_spec = rf"{tag}\s*:\s*{number}"
 axis_spec_re = re.compile(axis_spec)
 # (...) | number
 token_re = re.compile(rf"\([\s\S]*?\)|{number}")
+# comment | "string": matched first by the passes below and left unchanged
+skip = r"#[^\n]*|\"[^\"\n]*\""
 # <...>, allowing a nested <...> (e.g. a device table)
 value_record = r"<\s*((?:[^<>;]|<[^<>;]*>)*?)\s*>"
-value_record_re = re.compile(value_record)
+value_record_re = re.compile(rf"{skip}|{value_record}")
 # keywords marking records that are not plain value records
 value_record_keyword_re = re.compile(r"\b(?:device|contourpoint|NULL)\b")
 # number (axis_spec) number, with a leading value record alternative so
 # numbers inside records and anchors are not read as scalars
 scalar_re = re.compile(
-    rf"{value_record}|{number}(?:\s*\((?:\s*{axis_spec}\s*)+\)\s*{number})+"
+    rf"{skip}|{value_record}|{number}(?:\s*\((?:\s*{axis_spec}\s*)+\)\s*{number})+"
 )
 
 
@@ -152,7 +154,9 @@ def translate_gpos(fea, context: SimpleNamespace):
 
     # Convert ValueRecords
     fea = value_record_re.sub(
-        lambda m: translate_value_record(m, context.default_coords),
+        lambda m: m.group(0)
+        if m.group(0)[0] in '#"'
+        else translate_value_record(m, context.default_coords),
         fea,
     )
 
@@ -160,7 +164,7 @@ def translate_gpos(fea, context: SimpleNamespace):
     fea = scalar_re.sub(
         lambda m: (
             m.group(0)
-            if m.group(0).startswith("<")
+            if m.group(0)[0] in '#"<'
             else translate_scalar(m, context.default_coords)
         ),
         fea,

@@ -254,10 +254,11 @@ def translate_feature(body: str, masked_body: str, tag: str, context: SimpleName
     conditional = []
     for conds, text in segments[1:]:
         if conds is None:
-            raise ValueError(
-                f"bare condition statement is not supported in feature '{tag}'"
-            )
-        if text.strip():
+            # Rules after a bare `condition;` are unconditional again and go
+            # in the feature block. feaLib includes the feature's own lookups
+            # in every variation record, so they also apply inside regions.
+            base.append(text)
+        elif text.strip():
             conditional.append((conds, text))
 
     parts = [f"feature {tag} {{\n{''.join(base).strip()}\n}} {tag};\n"]

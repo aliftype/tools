@@ -14,7 +14,7 @@ feaLib_vf_pos_re = re.compile(rf"{tag}\s*=\s*{number}\s*:{number}")
 axis_spec = rf"{tag}\s*:\s*{number}"
 axis_spec_re = re.compile(axis_spec)
 # (...) | number
-token_re = re.compile(rf"\(.*?\)|{number}")
+token_re = re.compile(rf"\([\s\S]*?\)|{number}")
 # <...>
 value_record_re = re.compile(r"<\s*([^>;]+?)\s*>")
 # number (axis_spec) number

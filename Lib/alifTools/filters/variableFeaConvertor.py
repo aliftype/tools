@@ -2,6 +2,7 @@ import re
 from types import SimpleNamespace
 
 from fontTools.misc.roundTools import otRound
+from fontTools.varLib.featureVars import overlayFeatureVariations
 from ufo2ft.filters import BaseFilter
 
 tag = r"[a-zA-Z0-9]{4}"
@@ -175,7 +176,6 @@ feature_start_re = re.compile(rf"feature\s+({tag})\s*\{{")
 # condition ...; (as a whole word, not e.g. a glyph name like a.condition)
 condition = r"(?<![\w.])condition\b\s*([^;]*);"
 condition_re = re.compile(condition)
-condition_sub_re = re.compile(rf"{skip}|{condition}")
 # number < tag < number, with either limit allowed to be missing
 axis_range_re = re.compile(rf"(?:({number})\s*<\s*)?({tag})(?:\s*<\s*({number}))?")
 
@@ -206,9 +206,7 @@ def parse_conditions(params: str):
                 raise ValueError(f"empty condition range for axis '{tag}'")
         ranges[tag] = (c_min, c_max)
 
-    return tuple(
-        sorted((t, str(mn), str(mx)) for t, (mn, mx) in ranges.items())
-    )
+    return tuple(sorted((t, str(mn), str(mx)) for t, (mn, mx) in ranges.items()))
 
 
 def get_condition_set(conditions: list[tuple[str, str, str]], context: SimpleNamespace):
@@ -226,22 +224,21 @@ conditionset {name} {{
     return context.condition_sets[conditions], None
 
 
-def translate_condition(m: re.Match, context: SimpleNamespace, tag: str):
-    # Converts `number < tag < number, ...` to
-    conditions = parse_conditions(m.group(1))
-    name, condition_set = get_condition_set(conditions, context)
-    return f"""\
-}} {tag};
-
-{condition_set if condition_set is not None else ""}
-
-variation {tag} {name} {{
-"""
+def split_at_conditions(body: str, masked_body: str):
+    segments = []
+    last, conds = 0, None
+    for m in condition_re.finditer(masked_body):
+        segments.append((conds, body[last : m.start()]))
+        conds = parse_conditions(m.group(1))
+        last = m.end()
+    segments.append((conds, body[last:]))
+    return segments
 
 
 def translate_feature(body: str, masked_body: str, tag: str, context: SimpleNamespace):
-    # Splits the feature at condition statements and inserts the feaLib conditionset
-    # in the middle
+    # Splits the feature at condition statements and emits the unconditional
+    # rules in the feature block, followed by variation blocks for the
+    # conditional rules
     for m in condition_re.finditer(masked_body):
         depth = masked_body.count("{", 0, m.start()) - masked_body.count(
             "}", 0, m.start()
@@ -251,20 +248,36 @@ def translate_feature(body: str, masked_body: str, tag: str, context: SimpleName
                 f"condition statement inside a lookup block is not supported "
                 f"in feature '{tag}': {m.group(0).strip()}"
             )
-    content = condition_sub_re.sub(
-        lambda m: (
-            m.group(0)
-            if m.group(0)[0] in '#"'
-            else translate_condition(m, context, tag)
-        ),
-        body,
-    )
 
-    return f"""\
-feature {tag} {{
-{content}
-}} {tag};
-"""
+    segments = split_at_conditions(body, masked_body)
+    base = [segments[0][1]]
+    conditional = []
+    for conds, text in segments[1:]:
+        if conds is None:
+            raise ValueError(
+                f"bare condition statement is not supported in feature '{tag}'"
+            )
+        if text.strip():
+            conditional.append((conds, text))
+
+    parts = [f"feature {tag} {{\n{''.join(base).strip()}\n}} {tag};\n"]
+
+    # non-overlapping regions, most specific first
+    overlaid = overlayFeatureVariations(
+        [
+            ([{t: (float(mn), float(mx)) for t, mn, mx in conds}], {i: text})
+            for i, (conds, text) in enumerate(conditional)
+        ]
+    )
+    for box, values in overlaid:
+        conds = tuple(sorted((t, str(mn), str(mx)) for t, (mn, mx) in box.items()))
+        name, condition_set = get_condition_set(conds, context)
+        if condition_set is not None:
+            parts.append(f"\n{condition_set}")
+        rules = "\n".join(v.strip() for d in values for v in d.values())
+        parts.append(f"\nvariation {tag} {name} {{\n{rules}\n}} {tag};\n")
+
+    return "".join(parts)
 
 
 # comments and strings blanked, so scanning ignores braces and tags in them

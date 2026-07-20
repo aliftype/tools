@@ -147,9 +147,11 @@ def translate_value_record(match: re.Match, default_coords: str):
 def translate_gpos(fea, context: SimpleNamespace):
     # Convert ValueRecords
     fea = value_record_re.sub(
-        lambda m: m.group(0)
-        if m.group(0)[0] in '#"'
-        else translate_value_record(m, context.default_coords),
+        lambda m: (
+            m.group(0)
+            if m.group(0)[0] in '#"'
+            else translate_value_record(m, context.default_coords)
+        ),
         fea,
     )
 
@@ -168,10 +170,12 @@ def translate_gpos(fea, context: SimpleNamespace):
 
 # GSUB
 
-# feature tag {...} tag;
-feature_re = re.compile(r"feature\s+(" + tag + r")\s*\{([\s\S]*?)\}\s*\1\s*;")
+# feature tag {
+feature_start_re = re.compile(rf"feature\s+({tag})\s*\{{")
 # condition ...;
-condition_re = re.compile(r"condition\s*([^;]*);")
+condition = r"condition\s*([^;]*);"
+condition_re = re.compile(condition)
+condition_sub_re = re.compile(rf"{skip}|{condition}")
 # number < tag < number, with either limit allowed to be missing
 axis_range_re = re.compile(rf"(?:({number})\s*<\s*)?({tag})(?:\s*<\s*({number}))?")
 
@@ -227,15 +231,16 @@ variation {tag} {name} {{
 """
 
 
-def translate_feature(m: re.Match, context):
-    # Splits the feature at condition set and inserts the feaLib conditionset
+def translate_feature(body: str, masked_body: str, tag: str, context: SimpleNamespace):
+    # Splits the feature at condition statements and inserts the feaLib conditionset
     # in the middle
-    if not condition_re.search(m.group(2)):
-        return m.group(0)
-    tag = m.group(1)
-    content = condition_re.sub(
-        lambda m: translate_condition(m, context, tag),
-        m.group(2),
+    content = condition_sub_re.sub(
+        lambda m: (
+            m.group(0)
+            if m.group(0)[0] in '#"'
+            else translate_condition(m, context, tag)
+        ),
+        body,
     )
 
     return f"""\
@@ -245,11 +250,49 @@ feature {tag} {{
 """
 
 
+# comments and strings blanked, so scanning ignores braces and tags in them
+comment_or_string_re = re.compile(skip)
+
+
+def blank_comments_and_strings(fea: str):
+    return comment_or_string_re.sub(lambda m: " " * len(m.group()), fea)
+
+
+def match_block(masked: str, start: int):
+    # index of the brace closing the block opened before `start`, or -1
+    depth = 1
+    for i in range(start, len(masked)):
+        if masked[i] == "{":
+            depth += 1
+        elif masked[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
 def translate_gsub(fea: str, context: SimpleNamespace):
-    return feature_re.sub(
-        lambda m: translate_feature(m, context),
-        fea,
-    )
+    masked = blank_comments_and_strings(fea)
+    out = []
+    pos = 0
+    while m := feature_start_re.search(masked, pos):
+        tag = m.group(1)
+        close = match_block(masked, m.end())
+        if close < 0:
+            break
+        tail = re.match(rf"\s*{tag}\s*;", masked[close + 1 :])
+        end = close + 1 + (tail.end() if tail else 0)
+        masked_body = masked[m.end() : close]
+        if tail is None or not condition_re.search(masked_body):
+            out.append(fea[pos:end])
+        else:
+            out.append(fea[pos : m.start()])
+            out.append(
+                translate_feature(fea[m.end() : close], masked_body, tag, context)
+            )
+        pos = end
+    out.append(fea[pos:])
+    return "".join(out)
 
 
 class VariableFeaConvertorFilter(BaseFilter):

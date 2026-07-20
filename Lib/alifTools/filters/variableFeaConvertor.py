@@ -95,7 +95,13 @@ def translate_anchor(match: re.Match, record: str, context: SimpleNamespace):
     tokens: list[str] = token_re.findall(record.strip()[len("anchor") :])
     if len(tokens) < 5 or (len(tokens) - 2) % 3 != 0:
         raise ValueError(f"invalid variable anchor: <{record}>")
-    default_vals = [format_value(v) for v in tokens[:2]]
+
+    def value(token):
+        if token.startswith("("):
+            raise ValueError(f"invalid variable anchor: <{record}>")
+        return format_value(token)
+
+    default_vals = [value(v) for v in tokens[:2]]
     masters: list[tuple[str, list[str]]] = []
     for i in range(2, len(tokens), 3):
         if not tokens[i].startswith("("):
@@ -103,7 +109,7 @@ def translate_anchor(match: re.Match, record: str, context: SimpleNamespace):
         axes = translate_axis_spec(tokens[i], context.mappings)
         if not axes:
             raise ValueError(f"invalid axis location {tokens[i]} in anchor: <{record}>")
-        vals = [format_value(v) for v in tokens[i + 1 : i + 3]]
+        vals = [value(v) for v in tokens[i + 1 : i + 3]]
         masters.append((axes, vals))
     scalars: list[str] = []
     for i in range(2):
@@ -135,7 +141,12 @@ def translate_value_record(match: re.Match, context: SimpleNamespace):
     if len(tokens) < 9 or (len(tokens) - 4) % 5 != 0:
         raise ValueError(f"invalid variable value record: <{record}>")
 
-    default_vals = [format_value(v) for v in tokens[:4]]
+    def value(token):
+        if token.startswith("("):
+            raise ValueError(f"invalid variable value record: <{record}>")
+        return format_value(token)
+
+    default_vals = [value(v) for v in tokens[:4]]
     masters: list[tuple[str, list[str]]] = []
     for i in range(4, len(tokens), 5):
         if not tokens[i].startswith("("):
@@ -145,7 +156,7 @@ def translate_value_record(match: re.Match, context: SimpleNamespace):
             raise ValueError(
                 f"invalid axis location {tokens[i]} in value record: <{record}>"
             )
-        vals = [format_value(v) for v in tokens[i + 1 : i + 5]]
+        vals = [value(v) for v in tokens[i + 1 : i + 5]]
         masters.append((axes, vals))
 
     scalars: list[str] = []

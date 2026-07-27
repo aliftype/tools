@@ -336,8 +336,7 @@ def translate_feature(
                 # which feaLib rejects outright; dropping them is equivalent.
                 ranges = ", ".join(f"{mn} < {t} < {mx}" for t, mn, mx in conds)
                 logger.warning(
-                    "dropping rules in feature '%s': condition '%s' can "
-                    "never match",
+                    "dropping rules in feature '%s': condition '%s' can " "never match",
                     tag,
                     ranges,
                 )
@@ -369,11 +368,15 @@ def translate_feature(
         name, condition_set = get_condition_set(conds, context)
         if condition_set is not None:
             parts.append(f"\n{condition_set}")
-        # restore source order (overlay merges identical regions reversed)
-        rules = "\n".join(
-            text.strip()
-            for _, text in sorted((i, t) for d in values for i, t in d.items())
-        )
+        # A containing region’s rules also apply inside this one; the overlay
+        # skips single-point intersections, so merge them here. Sorting by the
+        # segment index restores source order.
+        merged: dict = {}
+        for other_box, other_values in ordered:
+            if other_box is box or box_within(box, other_box):
+                for d in other_values:
+                    merged.update(d)
+        rules = "\n".join(text.strip() for _, text in sorted(merged.items()))
         parts.append(f"\nvariation {tag} {name} {{\n{rules}\n}} {tag};\n")
 
     return "".join(parts)

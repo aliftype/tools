@@ -257,10 +257,8 @@ def parse_conditions(params: str, mappings=None):
             if c_max is not None
             else MAX_VALUE
         )
-        # multiple ranges for the same axis are intersected
         if tag in ranges:
-            c_min = max(c_min, ranges[tag][0])
-            c_max = min(c_max, ranges[tag][1])
+            raise ValueError(f"condition for axis '{tag}' already specified")
         ranges[tag] = (c_min, c_max)
 
     return tuple(sorted((t, str(mn), str(mx)) for t, (mn, mx) in ranges.items()))

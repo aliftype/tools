@@ -329,11 +329,7 @@ def run_shaping_regression(
     expectation = test["expectation"]
     if isinstance(expectation, dict):
         expectation = expectation.get(fontpath.name, expectation["default"])
-    output_serialized = serialize_buffer(
-        font,
-        output_buf,
-        glyphs_only="+" not in expectation,
-    )
+    output_serialized = serialize_buffer(font, output_buf)
 
     if output_serialized != expectation:
         failed_shaping_tests.append((test, expectation, output_buf, output_serialized))

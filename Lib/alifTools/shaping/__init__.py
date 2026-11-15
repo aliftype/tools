@@ -11,11 +11,6 @@ class Direction(StrEnum):
     BOTTOM_TO_TOP = "btt"
 
 
-class ComparisonMode(StrEnum):
-    FULL = "full"  # Record glyph names, offsets and advance widths.
-    GLYPHSTREAM = "glyphstream"  # Just glyph names.
-
-
 class ShapingParameters(TypedDict, total=False):
     script: str
     direction: str
@@ -49,7 +44,6 @@ class ShapingInput(TypedDict):
     language: Optional[str]
     direction: Optional[Direction]
     features: Dict[str, bool]
-    comparison_mode: ComparisonMode
     variations: Optional[Dict[str, float]]
 
 

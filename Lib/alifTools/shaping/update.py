@@ -25,7 +25,6 @@ import uharfbuzz as hb
 import yaml
 
 from . import (
-    ComparisonMode,
     Configuration,
     Direction,
     ShapingInput,
@@ -116,15 +115,7 @@ def shape_run(
     parameters = get_shaping_parameters(input, configuration)
     parameters: ShapingParameters = json.loads(json.dumps(parameters))
     buffer = shape(font, text, parameters)
-
-    shaping_comparison_mode = input.get("comparison_mode", ComparisonMode.FULL)
-    if shaping_comparison_mode is ComparisonMode.FULL:
-        glyphsonly = False
-    elif shaping_comparison_mode is ComparisonMode.GLYPHSTREAM:
-        glyphsonly = True
-    else:
-        raise ValueError(f"Unknown comparison mode {shaping_comparison_mode}.")
-    expectation = serialize_buffer(font, buffer, glyphsonly)
+    expectation = serialize_buffer(font, buffer)
 
     test: TestDefinition = {
         "only": font_path.name,
@@ -150,8 +141,6 @@ def load_shaping_input(input_path: Path) -> ShapingInputYaml:
     for input in inputs:
         if "direction" in input:
             input["direction"] = Direction(input["direction"])
-        if "comparison_mode" in input:
-            input["comparison_mode"] = ComparisonMode(input["comparison_mode"])
     shaping_input["input"] = inputs
 
     return shaping_input

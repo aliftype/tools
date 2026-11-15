@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, NamedTuple, Optional, Tuple
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple
 
 import uharfbuzz as hb
 
@@ -114,3 +114,34 @@ def compare_glyphs(
                         continue
                 found[name] = visible
     return changes
+
+
+def _positions(buffer: Any) -> List[Tuple[int, int, int, int]]:
+    return [
+        (p.x_offset, p.y_offset, p.x_advance, p.y_advance)
+        for p in buffer.glyph_positions
+    ]
+
+
+def buffers_render_same(
+    reference: hb.Font,  # type: ignore
+    reference_buffer: Any,
+    current: hb.Font,  # type: ignore
+    current_buffer: Any,
+    variations: Optional[Dict[str, float]],
+) -> bool:
+    if _positions(reference_buffer) != _positions(current_buffer):
+        return False
+    with _SetVariations(reference, variations), _SetVariations(current, variations):
+        for reference_info, current_info in zip(
+            reference_buffer.glyph_infos, current_buffer.glyph_infos
+        ):
+            reference_gid = reference_info.codepoint
+            current_gid = current_info.codepoint
+            reference_key = _glyph_key(reference, reference_gid)
+            current_key = _glyph_key(current, current_gid)
+            if reference_key == current_key and not reference_key.paint:
+                continue
+            if _bitmap(reference, reference_gid) != _bitmap(current, current_gid):
+                return False
+    return True

@@ -34,7 +34,7 @@ pyyaml==6.0.3
     # via AlifTools (pyproject.toml)
 ufo2ft==3.7.1
     # via AlifTools (pyproject.toml)
-uharfbuzz==0.53.6
+uharfbuzz==0.57.0
     # via
     #   AlifTools (pyproject.toml)
     #   blackrenderer

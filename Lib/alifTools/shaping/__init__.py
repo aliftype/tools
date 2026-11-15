@@ -34,6 +34,9 @@ class TestDefinition(ShapingParameters):
 
 
 class ShapingOutput(TypedDict):
+    harfbuzz: NotRequired[str]
+    uharfbuzz: NotRequired[str]
+    fonts: NotRequired[Dict[str, str]]
     configuration: NotRequired[Configuration]
     tests: List[TestDefinition]
 

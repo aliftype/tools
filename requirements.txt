@@ -8,6 +8,8 @@ blackrenderer==0.6.0
     # via AlifTools (pyproject.toml)
 booleanoperations==0.10.0
     # via ufo2ft
+cffi==2.1.1
+    # via pygit2
 cffsubr==0.4.0
     # via ufo2ft
 fontmath==0.10.0
@@ -24,6 +26,10 @@ lxml==6.1.0
     # via fonttools
 pyclipper==1.4.0
     # via booleanoperations
+pycparser==3.12
+    # via cffi
+pygit2==1.21.0
+    # via AlifTools (pyproject.toml)
 pyyaml==6.0.3
     # via AlifTools (pyproject.toml)
 ufo2ft==3.7.1

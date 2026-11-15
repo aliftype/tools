@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import enum
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, NotRequired, Optional, TypedDict
 
+import pygit2
 import uharfbuzz as hb
 import yaml
 
@@ -35,6 +37,8 @@ from . import (
     serialize_buffer,
     shape,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def main(args: List[str] | None = None) -> None:
@@ -65,13 +69,33 @@ def main(args: List[str] | None = None) -> None:
     shaping_output = update_shaping_output(shaping_input, fonts)
     output_path.write_text(json.dumps(shaping_output, indent=2, ensure_ascii=False))
 
+    # The check reads the reference fonts from git, and they might not be committed yet.
+    for font_path in fonts:
+        if not create_git_blob(font_path):
+            logger.warning("%s is not in a git repository", font_path)
+
+
+def create_git_blob(path: Path) -> bool:
+    repository = pygit2.discover_repository(str(path.parent))
+    if repository is None:
+        return False
+    pygit2.Repository(repository).create_blob(path.read_bytes())
+    return True
+
 
 def update_shaping_output(
     shaping_input: ShapingInputYaml,
     font_paths: List[Path],
 ) -> ShapingOutput:
     tests: List[TestDefinition] = []
-    shaping_output: ShapingOutput = {"tests": tests}
+    shaping_output: ShapingOutput = {
+        "harfbuzz": hb.version_string(),
+        "uharfbuzz": hb.__version__,
+        "fonts": {
+            path.name: str(pygit2.hash(path.read_bytes())) for path in font_paths
+        },
+        "tests": tests,
+    }
     if "configuration" in shaping_input:
         shaping_output["configuration"] = shaping_input["configuration"]
 

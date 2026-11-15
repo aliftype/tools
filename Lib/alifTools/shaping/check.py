@@ -30,6 +30,7 @@ from . import (
     ShapingParameters,
     TestDefinition,
     buffer_to_svg,
+    buffers_to_diff_svg,
     get_shaping_parameters,
     serialize_buffer,
     shape,
@@ -133,6 +134,7 @@ def create_report_item(
     note: str | None = None,
     extra_data: Dict | None = None,
     old_font: hb.Font | None = None,  # type: ignore
+    draw_diff: bool = True,
 ) -> str:
     message = f"<h4>{message}"
     if text:
@@ -156,6 +158,11 @@ def create_report_item(
             old_font = font
         try:
             message += f"Expected: {buffer_to_svg(old_font, old_buf, parameters)}"
+            if new_buf and draw_diff:
+                drawing = buffers_to_diff_svg(
+                    old_font, old_buf, font, new_buf, parameters
+                )
+                message += f"\nDiff: {drawing}"
         except KeyError:
             pass
 
@@ -379,6 +386,7 @@ def run_shaping_regression(
 ):
     shaping_text = test["input"]
     parameters = get_shaping_parameters(test, configuration)
+    variations = parameters.get("variations")
     output_buf = shape(font, shaping_text, parameters)
     expectation = test["expectation"]
     if isinstance(expectation, dict):
@@ -410,12 +418,16 @@ def run_shaping_regression(
     if reference_serialized != expectation:
         versions = f"HarfBuzz {extra_data['harfbuzz']} and {hb.version_string()}"
         title = f"Different output of {versions}"
+        old_buf = _buffer_from_string(reference, expectation)
         item = report_item(
             font=reference,
             new_buf=reference_buf,
-            old_buf=_buffer_from_string(reference, expectation),
+            old_buf=old_buf,
             serialized_new_buf=reference_serialized,
             serialized_old_buf=expectation,
+            draw_diff=not buffers_render_the_same(
+                reference, old_buf, reference, reference_buf, variations
+            ),
         )
         failed_shaping_tests.append((title, True, item))
 
@@ -428,7 +440,7 @@ def run_shaping_regression(
         visible = any(changed)
     else:
         visible = not buffers_render_the_same(
-            reference, reference_buf, font, output_buf, parameters.get("variations")
+            reference, reference_buf, font, output_buf, variations
         )
     title = "Changed rendering" if visible else "Same rendering, different glyphs"
     item = report_item(
@@ -437,6 +449,7 @@ def run_shaping_regression(
         old_buf=reference_buf,
         serialized_new_buf=output_serialized,
         serialized_old_buf=reference_serialized,
+        draw_diff=visible,
     )
     failed_shaping_tests.append((title, visible, item))
 

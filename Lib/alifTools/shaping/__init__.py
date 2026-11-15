@@ -190,8 +190,9 @@ def _glyph_to_svg_id(
     font: hb.Font,  # type: ignore
     gid: int,
     defs: Dict[str, str],
+    prefix: str = "g",
 ) -> str:
-    id = f"g{gid}"
+    id = f"{prefix}{gid}"
     if id not in defs:
         p = _glyph_to_svg_path(font, gid)
         defs[id] = f'<path id="{id}" d="{p}"/>'
@@ -205,29 +206,31 @@ def _to_svg_color(color):
     return f"rgb({','.join(svg_color)})"
 
 
-def _glyph_to_svg(font, gid, x, y, defs):
+def _glyph_to_svg(font, gid, x, y, defs, prefix="g"):
     transform = f'transform="translate({x},{y})"'
     svg = [f"<g {transform}>"]
     face = font.face
     if (layers := face.get_glyph_color_layers(gid)) and (palettes := face.color_palettes):  # type: ignore
         for layer in layers:
-            id = _glyph_to_svg_id(font, layer.glyph, defs)
+            id = _glyph_to_svg_id(font, layer.glyph, defs, prefix)
             if layer.color_index != 0xFFFF:
                 color = _to_svg_color(palettes[0].colors[layer.color_index])
                 svg.append(f'<use href="#{id}" fill="{color}"/>')
             else:
                 svg.append(f'<use href="#{id}"/>')
     else:
-        id = _glyph_to_svg_id(font, gid, defs)
+        id = _glyph_to_svg_id(font, gid, defs, prefix)
         svg.append(f'<use href="#{id}"/>')
     svg.append("</g>")
     return "\n".join(svg)
 
 
-def _draw_buffer(
+def _draw_glyphs(
     font: hb.Font,  # type: ignore
     buffer: hb.Buffer,  # type: ignore
-) -> str:
+    prefix: str = "g",
+) -> tuple[Dict[str, str], List[str], tuple[int, int, int, int]]:
+    """Return the glyph definitions, the placed glyphs and the bounding box."""
     defs = {}
     paths = []
 
@@ -240,7 +243,9 @@ def _draw_buffer(
     y_cursor = 0
     for info, pos in zip(buffer.glyph_infos, buffer.glyph_positions):
         dx, dy = pos.x_offset, pos.y_offset
-        p = _glyph_to_svg(font, info.codepoint, x_cursor + dx, y_cursor + dy, defs)
+        p = _glyph_to_svg(
+            font, info.codepoint, x_cursor + dx, y_cursor + dy, defs, prefix
+        )
         paths.append(p)
 
         if extents := font.get_glyph_extents(info.codepoint):
@@ -258,6 +263,14 @@ def _draw_buffer(
         x_cursor += pos.x_advance
         y_cursor += pos.y_advance
 
+    return defs, paths, (x_min, y_min, x_max, y_max)
+
+
+def _draw_buffer(
+    font: hb.Font,  # type: ignore
+    buffer: hb.Buffer,  # type: ignore
+) -> str:
+    defs, paths, (x_min, y_min, x_max, y_max) = _draw_glyphs(font, buffer)
     svg = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{x_min} {y_min} {x_max - x_min} {y_max - y_min}" transform="matrix(1 0 0 -1 0 0)">',
         "<defs>",
@@ -285,3 +298,49 @@ def buffer_to_svg(
     svg = base64.b64encode(svg.encode("utf-8")).decode("utf-8")
     img = f'<img src="data:image/svg+xml;base64,{svg}" alt="SVG output">'
     return img
+
+
+def buffers_to_diff_svg(
+    expected_font: hb.Font,  # type: ignore
+    expected_buffer: hb.Buffer,  # type: ignore
+    font: hb.Font,  # type: ignore
+    buffer: hb.Buffer,  # type: ignore
+    parameters: ShapingParameters,
+) -> str:
+    import base64
+
+    variations = parameters.get("variations")
+    with _SetVariations(expected_font, variations):
+        expected = _draw_glyphs(expected_font, expected_buffer, "e")
+    with _SetVariations(font, variations):
+        actual = _draw_glyphs(font, buffer, "a")
+    x_min = min(expected[2][0], actual[2][0])
+    y_min = min(expected[2][1], actual[2][1])
+    x_max = max(expected[2][2], actual[2][2])
+    y_max = max(expected[2][3], actual[2][3])
+
+    # The opacity is on the groups, so overlaps inside one drawing are not
+    # darker.
+    svg = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{x_min} {y_min} {x_max - x_min} {y_max - y_min}" transform="matrix(1 0 0 -1 0 0)">',
+        "<style>",
+        ".expected { opacity: 0.6; }",
+        ".expected use { fill: rgb(255, 0, 0); }",
+        ".actual { opacity: 0.6; mix-blend-mode: multiply; }",
+        ".actual use { fill: rgb(0, 255, 0); }",
+        "</style>",
+        "<defs>",
+        *expected[0].values(),
+        *actual[0].values(),
+        "</defs>",
+        '<g class="expected">',
+        *expected[1],
+        "</g>",
+        '<g class="actual">',
+        *actual[1],
+        "</g>",
+        "</svg>",
+        "",
+    ]
+    svg = base64.b64encode("\n".join(svg).encode("utf-8")).decode("utf-8")
+    return f'<img src="data:image/svg+xml;base64,{svg}" alt="SVG diff">'

@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Generator
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict
 
+import pygit2
 import uharfbuzz as hb
 
 from . import (
@@ -34,6 +36,7 @@ from . import (
     FakeBuffer,
     FakeItem,
 )
+from .compare import buffers_render_the_same, compare_glyphs
 
 
 class Message:
@@ -257,6 +260,9 @@ def run_a_set_of_shaping_tests(
                 shaping_file,
                 shaping_input_doc,
             )
+            if isinstance(extra_data, Message):
+                yield False, extra_data
+                continue
 
         failed_shaping_tests = []
         for test in shaping_tests:
@@ -314,14 +320,53 @@ def check_shaping_regression(
     configuration: Configuration,
     fontpath: Path,
 ) -> Generator[tuple[bool | None, Message]]:
-    """Check that texts shape as per expectation"""
+    """Check that texts shape and render as expected"""
     yield from run_a_set_of_shaping_tests(
         configuration,
         fontpath,
         run_shaping_regression,
         lambda test, configuration: "expectation" in test,
         generate_shaping_regression_report,
+        prepare_shaping_regression,
     )
+
+
+def _location(parameters: ShapingParameters) -> tuple:
+    return tuple(sorted((parameters.get("variations") or {}).items()))
+
+
+def prepare_shaping_regression(
+    fontpath: Path,
+    configuration: Configuration,
+    shaping_file: Path,
+    document: Dict[str, Any],
+) -> Dict[str, Any] | Message:
+    data = fontpath.read_bytes()
+    blob_id = document.get("fonts", {}).get(fontpath.name)
+    if blob_id is None:
+        return Message(
+            "shaping-reference-font",
+            f"{shaping_file}: The file has no reference font for {fontpath.name}.",
+        )
+    state = {"reference": None, "changes": {}, "harfbuzz": document.get("harfbuzz")}
+    if blob_id == str(pygit2.hash(data)):
+        return state
+    repository = pygit2.discover_repository(str(shaping_file.parent))
+    blob = pygit2.Repository(repository).get(blob_id) if repository else None
+    if blob is None:
+        return Message(
+            "shaping-reference-font",
+            f"{shaping_file}: The reference font {blob_id} for {fontpath.name} is not in git.",
+        )
+    state["reference"] = hb.Font(hb.Face(hb.Blob(blob.data)))  # type: ignore
+    locations = {
+        _location(get_shaping_parameters(test, configuration))
+        for test in document["tests"]
+    }
+    state["changes"] = compare_glyphs(
+        state["reference"], hb.Font(hb.Face(hb.Blob(data))), locations  # type: ignore
+    )
+    return state
 
 
 def run_shaping_regression(
@@ -340,8 +385,60 @@ def run_shaping_regression(
         expectation = expectation.get(fontpath.name, expectation["default"])
     output_serialized = serialize_buffer(font, output_buf)
 
-    if output_serialized != expectation:
-        failed_shaping_tests.append((test, expectation, output_buf, output_serialized))
+    reference = extra_data["reference"]
+    if reference is None:
+        reference = font
+        reference_buf = output_buf
+        reference_serialized = output_serialized
+    else:
+        reference_buf = shape(reference, shaping_text, parameters)
+        reference_serialized = serialize_buffer(reference, reference_buf)
+
+    report_item = partial(
+        create_report_item,
+        message=shaping_text,
+        parameters=parameters,
+        note=test.get("note"),
+        extra_data={
+            k: test[k]
+            for k in ["script", "language", "direction", "features", "variations"]
+            if k in test
+        },
+        old_font=reference,
+    )
+
+    if reference_serialized != expectation:
+        versions = f"HarfBuzz {extra_data['harfbuzz']} and {hb.version_string()}"
+        title = f"Different output of {versions}"
+        item = report_item(
+            font=reference,
+            new_buf=reference_buf,
+            old_buf=_buffer_from_string(reference, expectation),
+            serialized_new_buf=reference_serialized,
+            serialized_old_buf=expectation,
+        )
+        failed_shaping_tests.append((title, True, item))
+
+    if output_serialized == reference_serialized:
+        changes = extra_data["changes"].get(_location(parameters), {})
+        names = {font.get_glyph_name(info.codepoint) for info in output_buf.glyph_infos}
+        changed = [changes[name] for name in names if name in changes]
+        if not changed:
+            return
+        visible = any(changed)
+    else:
+        visible = not buffers_render_the_same(
+            reference, reference_buf, font, output_buf, parameters.get("variations")
+        )
+    title = "Changed rendering" if visible else "Same rendering, different glyphs"
+    item = report_item(
+        font=font,
+        new_buf=output_buf,
+        old_buf=reference_buf,
+        serialized_new_buf=output_serialized,
+        serialized_old_buf=reference_serialized,
+    )
+    failed_shaping_tests.append((title, visible, item))
 
 
 def generate_shaping_regression_report(
@@ -351,34 +448,15 @@ def generate_shaping_regression_report(
     failed_shaping_tests: list,
     extra_data: Any,
 ) -> Generator[tuple[bool | None, Message]]:
+    sections: Dict[tuple[str, bool], list[str]] = {}
+    for title, visible, item in failed_shaping_tests:
+        sections.setdefault((title, visible), []).append(item)
     report_items = []
-    for test, expected, output_buf, output_serialized in failed_shaping_tests:
-        extra_data = {
-            k: test[k]
-            for k in ["script", "language", "direction", "features", "variations"]
-            if k in test
-        }
-        parameters = get_shaping_parameters(test, configuration)
-
-        if "=" in expected:
-            buf2 = _buffer_from_string(font, expected)
-        else:
-            buf2 = expected
-
-        report_item = create_report_item(
-            font=font,
-            message="Shaping did not match",
-            text=test["input"],
-            parameters=parameters,
-            new_buf=output_buf,
-            old_buf=buf2,
-            serialized_new_buf=output_serialized,
-            serialized_old_buf=expected,
-            note=test.get("note"),
-            extra_data=extra_data,
+    for (title, visible), items in sections.items():
+        summary = f"<summary>{title} ({len(items)})</summary>"
+        report_items.append(
+            f"<details{' open' if visible else ''}>{summary}{''.join(items)}</details>"
         )
-        report_items.append(report_item)
-
     header = f"{shaping_file}: Expected and actual shaping not matching"
     yield False, Message("shaping-regression", header, report_items)
 
@@ -561,7 +639,7 @@ def run_checks(
     fontpath: Path,
 ):
     return {
-        "Check that texts shape as per expectation": check_shaping_regression(
+        "Check that texts shape and render as expected": check_shaping_regression(
             configuration,
             fontpath,
         ),
@@ -645,6 +723,15 @@ def generate_html(
 
         .items pre .actual {
             background-color: rgba(0, 255, 0, 0.2);
+        }
+
+        .items summary {
+            margin: 1em 0;
+            padding: 0.5em;
+            border: 1px solid #ccc;
+            background-color: #f2f2f2;
+            font-weight: bold;
+            cursor: pointer;
         }
     </style>
 </head>

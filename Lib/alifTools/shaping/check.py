@@ -129,6 +129,7 @@ def create_report_item(
     serialized_old_buf: str | None = None,
     note: str | None = None,
     extra_data: Dict | None = None,
+    old_font: hb.Font | None = None,  # type: ignore
 ) -> str:
     message = f"<h4>{message}"
     if text:
@@ -147,9 +148,11 @@ def create_report_item(
     if new_buf:
         message += f"Got: {buffer_to_svg(font, new_buf, parameters)}\n"
 
-    if old_buf and isinstance(old_buf, FakeBuffer):
+    if old_buf is not None and not isinstance(old_buf, str):
+        if old_font is None:
+            old_font = font
         try:
-            message += f"Expected: {buffer_to_svg(font, old_buf, parameters)}"
+            message += f"Expected: {buffer_to_svg(old_font, old_buf, parameters)}"
         except KeyError:
             pass
 

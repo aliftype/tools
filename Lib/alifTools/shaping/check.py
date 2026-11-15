@@ -248,7 +248,12 @@ def run_a_set_of_shaping_tests(
             return
 
         if preparation:
-            extra_data = preparation(fontpath, configuration)
+            extra_data = preparation(
+                fontpath,
+                configuration,
+                shaping_file,
+                shaping_input_doc,
+            )
 
         failed_shaping_tests = []
         for test in shaping_tests:
@@ -292,6 +297,7 @@ def run_a_set_of_shaping_tests(
                     configuration,
                     shaping_file,
                     failed_shaping_tests,
+                    extra_data,
                 )
 
     if not shaping_file_found:
@@ -340,6 +346,7 @@ def generate_shaping_regression_report(
     configuration: Configuration,
     shaping_file: Path,
     failed_shaping_tests: list,
+    extra_data: Any,
 ) -> Generator[tuple[bool | None, Message]]:
     report_items = []
     for test, expected, output_buf, output_serialized in failed_shaping_tests:
@@ -433,6 +440,7 @@ def forbidden_glyph_test_results(
     configuration: Configuration,
     shaping_file: Path,
     failed_shaping_tests: list,
+    extra_data: Any,
 ) -> Generator[tuple[bool | None, Message]]:
     report_items = []
     for shaping_text, buf, highlighted, pattern in failed_shaping_tests:
@@ -469,6 +477,8 @@ def check_shaping_collides(
 def setup_glyph_collides(
     fontpath: Path,
     configuration: Configuration,
+    shaping_file: Path,
+    document: Dict[str, Any],
 ) -> Dict[str, Any]:
     collidoscope_configuration = configuration.get("collidoscope")
     if not collidoscope_configuration:
@@ -521,6 +531,7 @@ def collides_glyph_test_results(
     configuration: Configuration,
     shaping_file: Path,
     failed_shaping_tests: list,
+    extra_data: Any,
 ) -> Generator[tuple[bool | None, Message]]:
     report_items = []
     seen_bumps = {}
